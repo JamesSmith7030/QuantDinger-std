@@ -4,6 +4,45 @@ This document records version updates, new features, bug fixes, and database mig
 
 ---
 
+## V2.2.3 (2026-03-24)
+
+### 🚀 New Features
+
+- **User profile IANA timezone (`qd_users.timezone`)**: 个人资料可保存时区（IANA 标识，如 `Asia/Shanghai`）；为空表示跟随浏览器。登录态 `/api/auth/info`、资料接口与前端 AI 分析页等时间展示会按该时区调用 `toLocaleString(..., { timeZone })`（非法或空则回退本机时区）。
+
+### 📋 Database Migration
+
+**在已有 PostgreSQL 库上执行（新库若已通过更新后的 `migrations/init.sql` 初始化则无需再执行）：**
+
+```sql
+-- ============================================================
+-- QuantDinger V2.2.3 — qd_users.timezone（用户资料时区）
+-- ============================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'qd_users'
+          AND column_name = 'timezone'
+    ) THEN
+        ALTER TABLE qd_users ADD COLUMN timezone VARCHAR(64) DEFAULT '';
+        RAISE NOTICE 'Added timezone column to qd_users table';
+    END IF;
+END $$;
+```
+
+**仅当列不存在时的一行式写法（自行确认无列后再执行）：**
+
+```sql
+ALTER TABLE qd_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT '';
+```
+
+> 说明：`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 需 **PostgreSQL 11+**（本仓库 Docker 默认 `postgres:16` 可用）；与上面 `DO` 块二选一即可。
+
+---
+
 ## V2.2.2 (2026-02-28)
 
 ### 🚀 New Features

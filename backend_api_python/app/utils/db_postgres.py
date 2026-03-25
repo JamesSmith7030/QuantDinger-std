@@ -222,6 +222,16 @@ class PostgresConnection:
                 logger.warning(f"Failed to return connection to pool: {e}")
 
 
+def _ensure_session_utc(conn) -> None:
+    """每条连接检出后固定为 UTC，与 API 序列化约定一致。"""
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TIME ZONE 'UTC'")
+        cur.close()
+    except Exception as e:
+        logger.warning(f"Could not SET TIME ZONE UTC on connection: {e}")
+
+
 @contextmanager
 def get_pg_connection():
     """
@@ -231,6 +241,7 @@ def get_pg_connection():
     conn = None
     try:
         conn = pool.getconn()
+        _ensure_session_utc(conn)
         pg_conn = PostgresConnection(conn)
         yield pg_conn
     except Exception as e:
@@ -258,6 +269,7 @@ def get_pg_connection_sync() -> PostgresConnection:
     """
     pool = _get_connection_pool()
     conn = pool.getconn()
+    _ensure_session_utc(conn)
     return PostgresConnection(conn)
 
 

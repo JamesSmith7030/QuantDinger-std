@@ -5,6 +5,7 @@ Provides endpoints for user CRUD operations, role management, etc.
 Only accessible by admin users.
 """
 import json
+import re
 from flask import Blueprint, request, jsonify, g
 from app.services.user_service import get_user_service
 from app.utils.auth import login_required, admin_required
@@ -12,6 +13,8 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_PROFILE_TIMEZONE_RE = re.compile(r'^[A-Za-z0-9_/+\-.]+$')
 
 user_bp = Blueprint('user_manage', __name__)
 
@@ -411,6 +414,7 @@ def update_profile():
     Request body:
         nickname: str (optional)
         avatar: str (optional)
+        timezone: str (optional, IANA id; empty = follow client)
     
     Note: Email cannot be changed after registration (for security).
           Only admin can change user email via User Management.
@@ -428,6 +432,16 @@ def update_profile():
         for field in ['nickname', 'avatar']:
             if field in data:
                 allowed[field] = data[field]
+        
+        if 'timezone' in data:
+            tz = (data.get('timezone') or '').strip()
+            if tz and (len(tz) > 64 or not _PROFILE_TIMEZONE_RE.match(tz)):
+                return jsonify({
+                    'code': 0,
+                    'msg': 'Invalid timezone identifier',
+                    'data': None
+                }), 400
+            allowed['timezone'] = tz
         
         if not allowed:
             return jsonify({'code': 0, 'msg': 'No valid fields to update', 'data': None}), 400

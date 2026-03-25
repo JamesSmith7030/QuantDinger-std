@@ -715,14 +715,15 @@ class SignalNotifier:
         try:
             # Heuristic: if port is 465 and SMTP_USE_SSL is not explicitly set, assume SSL.
             use_ssl = bool(self.smtp_use_ssl) or int(self.smtp_port or 0) == 465
+            smtp_timeout = max(self.timeout_sec, 20)
             if use_ssl:
-                with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=self.timeout_sec) as server:
+                with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=smtp_timeout) as server:
                     server.ehlo()
                     if self.smtp_user and self.smtp_password:
                         server.login(self.smtp_user, self.smtp_password)
                     server.send_message(msg)
             else:
-                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.timeout_sec) as server:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=smtp_timeout) as server:
                     server.ehlo()
                     if self.smtp_use_tls:
                         server.starttls()

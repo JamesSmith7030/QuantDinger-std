@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS qd_users (
     email_verified BOOLEAN DEFAULT FALSE,  -- 邮箱是否已验证
     referred_by INTEGER,                   -- 邀请人ID
     notification_settings TEXT DEFAULT '', -- 用户通知配置 JSON (telegram_chat_id, default_channels等)
+    timezone VARCHAR(64) DEFAULT '',       -- IANA 时区标识，空表示跟随客户端/浏览器
     token_version INTEGER DEFAULT 1,       -- Token版本号，用于单一客户端登录控制
     last_login_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -653,6 +654,21 @@ BEGIN
     ) THEN
         ALTER TABLE qd_users ADD COLUMN token_version INTEGER DEFAULT 1;
         RAISE NOTICE 'Added token_version column to qd_users table';
+    END IF;
+END $$;
+
+-- =============================================================================
+-- 20b. Migration: user profile timezone (IANA)
+-- =============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qd_users' AND column_name = 'timezone'
+    ) THEN
+        ALTER TABLE qd_users ADD COLUMN timezone VARCHAR(64) DEFAULT '';
+        RAISE NOTICE 'Added timezone column to qd_users table';
     END IF;
 END $$;
 

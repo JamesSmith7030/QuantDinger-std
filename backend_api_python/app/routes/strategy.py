@@ -872,12 +872,16 @@ def get_strategy_notifications():
             cur.close()
 
         # Convert created_at to UTC timestamp (seconds) for frontend
+        from datetime import timezone as _dt_tz
         processed_rows = []
         for row in rows:
             item = dict(row)
             created_at = item.get('created_at')
             if created_at:
                 if hasattr(created_at, 'timestamp'):
+                    # 无时区 datetime：连接已 SET TIME ZONE UTC，按 UTC 解释再转 Unix，避免服务端本地 TZ 误判
+                    if getattr(created_at, 'tzinfo', None) is None:
+                        created_at = created_at.replace(tzinfo=_dt_tz.utc)
                     item['created_at'] = int(created_at.timestamp())
                 elif isinstance(created_at, str):
                     try:

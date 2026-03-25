@@ -65,6 +65,70 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+def _resolve_notification_delivery(user_id: int, notification_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    合并个人中心保存的 notification_settings 到 targets，并规范化 channels。
+    前端创建监控常只传 channels（email/telegram/webhook），不传 targets；若不合并则外发渠道全部跳过且无任何送达。
+    若当前 channels 均无法送达（无邮箱/Chat ID 等），则追加 browser 保证站内通知。
+    """
+    cfg: Dict[str, Any] = dict(notification_config) if isinstance(notification_config, dict) else {}
+    raw_ch = cfg.get('channels')
+    if isinstance(raw_ch, str):
+        raw_ch = [raw_ch]
+    elif not isinstance(raw_ch, list):
+        raw_ch = []
+    channels = [str(c).strip().lower() for c in raw_ch if c is not None and str(c).strip()]
+    if not channels:
+        channels = ['browser']
+
+    targets: Dict[str, Any] = dict(cfg.get('targets') or {})
+
+    try:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                "SELECT email, notification_settings FROM qd_users WHERE id = ?",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+        if not row:
+            account_email = ""
+            settings = {}
+        else:
+            account_email = (row.get("email") or "").strip()
+            settings = _safe_json_loads(row.get("notification_settings"), {})
+        if not (targets.get("email") or "").strip():
+            te = (settings.get("email") or "").strip()
+            targets["email"] = te or account_email
+        if not (targets.get("telegram") or "").strip():
+            targets["telegram"] = (settings.get("telegram_chat_id") or "").strip()
+        if not (targets.get("telegram_bot_token") or "").strip():
+            targets["telegram_bot_token"] = (settings.get("telegram_bot_token") or "").strip()
+        if not (targets.get("webhook") or "").strip():
+            targets["webhook"] = (settings.get("webhook_url") or "").strip()
+    except Exception as e:
+        logger.warning(f"_resolve_notification_delivery: load user {user_id} settings failed: {e}")
+
+    def _can_deliver(ch: str) -> bool:
+        if ch == "browser":
+            return True
+        if ch == "email":
+            return bool((targets.get("email") or "").strip())
+        if ch == "telegram":
+            return bool((targets.get("telegram") or "").strip())
+        if ch == "webhook":
+            return bool((targets.get("webhook") or "").strip())
+        return False
+
+    if not any(_can_deliver(c) for c in channels):
+        channels = list(dict.fromkeys(list(channels) + ["browser"]))
+
+    cfg["channels"] = channels
+    cfg["targets"] = targets
+    return cfg
+
+
 def _safe_json_loads(value, default=None):
     """Safely parse JSON string."""
     if default is None:
@@ -159,7 +223,7 @@ def _get_positions_for_monitor(position_ids: List[int] = None, user_id: int = No
 MAX_PARALLEL_ANALYSIS = 5
 
 
-def _analyze_single_position(pos: Dict[str, Any], language: str) -> Dict[str, Any]:
+def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = None) -> Dict[str, Any]:
     """Analyze a single position (designed to run inside a thread pool)."""
     market = pos.get('market')
     symbol = pos.get('symbol')
@@ -170,10 +234,11 @@ def _analyze_single_position(pos: Dict[str, Any], language: str) -> Dict[str, An
         return {'market': market, 'symbol': symbol, 'name': name, 'error': 'missing market/symbol'}
 
     try:
-        logger.info(f"Running fast AI analysis for {market}:{symbol}")
+        logger.info(f"Running fast AI analysis for {market}:{symbol} (user={user_id})")
         service = get_fast_analysis_service()
         analysis_result = service.analyze(
-            market=market, symbol=symbol, language=language, timeframe='1D'
+            market=market, symbol=symbol, language=language, timeframe='1D',
+            user_id=user_id,
         )
 
         detailed = analysis_result.get('detailed_analysis', {})
@@ -213,40 +278,104 @@ def _analyze_single_position(pos: Dict[str, Any], language: str) -> Dict[str, An
         return {'market': market, 'symbol': symbol, 'name': name, 'error': str(e)}
 
 
-def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
+def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], user_id: int = None) -> Dict[str, Any]:
     """
     Run fast AI analysis on positions **in parallel** using a thread pool.
+    Same (market, symbol) is analyzed only once; the result is shared across
+    duplicate positions so we don't waste LLM calls or show redundant entries.
     """
     try:
         language = config.get('language', 'en-US')
         custom_prompt = config.get('prompt', '')
 
-        workers = min(len(positions), MAX_PARALLEL_ANALYSIS)
-        position_analyses: List[Dict[str, Any]] = [None] * len(positions)
+        # ── Deduplicate by (market, symbol) ──
+        unique_map: Dict[str, int] = {}          # "market|symbol" -> index in unique_positions
+        unique_positions: List[Dict[str, Any]] = []
+        pos_to_unique: List[int] = []             # positions[i] -> unique_positions index
+        for pos in positions:
+            key = f"{pos.get('market')}|{pos.get('symbol')}"
+            if key not in unique_map:
+                unique_map[key] = len(unique_positions)
+                unique_positions.append(pos)
+            pos_to_unique.append(unique_map[key])
+
+        workers = min(len(unique_positions), MAX_PARALLEL_ANALYSIS)
+        unique_analyses: List[Dict[str, Any]] = [None] * len(unique_positions)
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_idx = {
-                executor.submit(_analyze_single_position, pos, language): idx
-                for idx, pos in enumerate(positions)
+                executor.submit(_analyze_single_position, pos, language, user_id): idx
+                for idx, pos in enumerate(unique_positions)
             }
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
-                    position_analyses[idx] = future.result()
+                    unique_analyses[idx] = future.result()
                 except Exception as e:
-                    pos = positions[idx]
-                    position_analyses[idx] = {
+                    pos = unique_positions[idx]
+                    unique_analyses[idx] = {
                         'market': pos.get('market'), 'symbol': pos.get('symbol'),
                         'name': pos.get('name') or pos.get('symbol'), 'error': str(e)
                     }
 
-        analysis_report = _build_comprehensive_report(positions, position_analyses, language, custom_prompt)
+        # ── Map back: each position gets its own copy with position-specific P&L ──
+        position_analyses: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+        for i, pos in enumerate(positions):
+            key = f"{pos.get('market')}|{pos.get('symbol')}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            base = dict(unique_analyses[pos_to_unique[i]])
+            base['entry_price'] = pos.get('entry_price')
+            base['current_price'] = base.get('current_price') or pos.get('current_price')
+            combined_qty = sum(
+                float(p.get('quantity') or 0)
+                for j, p in enumerate(positions)
+                if f"{p.get('market')}|{p.get('symbol')}" == key
+            )
+            combined_cost = sum(
+                float(p.get('entry_price') or 0) * float(p.get('quantity') or 0)
+                for j, p in enumerate(positions)
+                if f"{p.get('market')}|{p.get('symbol')}" == key
+            )
+            cur_price = float(base.get('current_price') or 0)
+            combined_pnl = sum(
+                float(p.get('pnl') or 0)
+                for j, p in enumerate(positions)
+                if f"{p.get('market')}|{p.get('symbol')}" == key
+            )
+            avg_entry = round(combined_cost / combined_qty, 4) if combined_qty else 0
+            pnl_pct = round(combined_pnl / combined_cost * 100, 2) if combined_cost else 0
+            base['quantity'] = combined_qty
+            base['entry_price'] = avg_entry
+            base['pnl'] = round(combined_pnl, 2)
+            base['pnl_percent'] = pnl_pct
+            position_analyses.append(base)
+
+        # Also provide deduplicated positions list for report building
+        deduped_positions = []
+        seen_keys2: set = set()
+        for i, pos in enumerate(positions):
+            key = f"{pos.get('market')}|{pos.get('symbol')}"
+            if key in seen_keys2:
+                continue
+            seen_keys2.add(key)
+            merged = dict(pos)
+            merged['quantity'] = position_analyses[len(deduped_positions)].get('quantity', pos.get('quantity'))
+            merged['entry_price'] = position_analyses[len(deduped_positions)].get('entry_price', pos.get('entry_price'))
+            merged['pnl'] = position_analyses[len(deduped_positions)].get('pnl', pos.get('pnl'))
+            merged['pnl_percent'] = position_analyses[len(deduped_positions)].get('pnl_percent', pos.get('pnl_percent'))
+            deduped_positions.append(merged)
+
+        analysis_report = _build_comprehensive_report(deduped_positions, position_analyses, language, custom_prompt)
 
         return {
             'success': True,
             'analysis': analysis_report,
             'position_analyses': position_analyses,
-            'position_count': len(positions),
+            'positions': deduped_positions,
+            'position_count': len(deduped_positions),
             'analyzed_count': len([p for p in position_analyses if not p.get('error')]),
             'timestamp': _now_ts()
         }
@@ -629,109 +758,344 @@ def _build_telegram_report(
     language: str,
     custom_prompt: str = ''
 ) -> str:
-    """Build a concise report suitable for Telegram (HTML format)."""
-    
-    # Calculate summary
-    total_cost = sum(float(p.get('entry_price', 0)) * float(p.get('quantity', 0)) for p in positions)
-    total_pnl = sum(float(p.get('pnl', 0)) for p in positions)
-    total_pnl_percent = round(total_pnl / total_cost * 100, 2) if total_cost > 0 else 0
-    
+    """Build a concise report suitable for Telegram (HTML format).
+
+    Positions with quantity>0 and entry_price>0 are shown with P&L;
+    others are treated as watchlist items and only show current price.
+    """
+
+    def _has_holding(pa: Dict[str, Any]) -> bool:
+        return float(pa.get('quantity') or 0) > 0 and float(pa.get('entry_price') or 0) > 0
+
+    held = [p for p in position_analyses if _has_holding(p) and not p.get('error')]
+    watched = [p for p in position_analyses if not _has_holding(p) and not p.get('error')]
+    errored = [p for p in position_analyses if p.get('error')]
+
+    total_cost = sum(float(p.get('entry_price', 0)) * float(p.get('quantity', 0)) for p in held)
+    total_pnl = sum(float(p.get('pnl', 0)) for p in held)
+    total_pnl_pct = round(total_pnl / total_cost * 100, 2) if total_cost > 0 else 0
+    pnl_sign = '+' if total_pnl >= 0 else ''
+
     buy_count = len([p for p in position_analyses if p.get('final_decision') == 'BUY'])
     sell_count = len([p for p in position_analyses if p.get('final_decision') == 'SELL'])
     hold_count = len([p for p in position_analyses if p.get('final_decision') == 'HOLD'])
-    
+
     is_zh = language.startswith('zh')
-    pnl_sign = '+' if total_pnl >= 0 else ''
-    
+
+    # ── Header / Overview ──
     if is_zh:
-        lines = [
-            "<b>📊 投资组合AI分析报告</b>",
-            "",
-            "<b>📈 组合概览</b>",
-            f"• 持仓: {len(positions)} 个",
-            f"• 总成本: ${total_cost:,.2f}",
-            f"• 总盈亏: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_percent:.1f}%)",
+        lines: List[str] = ["<b>📊 AI资产分析报告</b>", ""]
+        overview = ["<b>📈 概览</b>"]
+        if held:
+            overview.append(f"• 持仓: {len(held)} 个")
+            overview.append(f"• 总成本: ${total_cost:,.2f}")
+            overview.append(f"• 总盈亏: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_pct:.1f}%)")
+        if watched:
+            overview.append(f"• 观察: {len(watched)} 个")
+        lines.extend(overview)
+        lines.extend([
             "",
             "<b>🤖 AI建议汇总</b>",
             f"🟢 买入: {buy_count} | 🔴 卖出: {sell_count} | 🟡 持有: {hold_count}",
-            "",
-            "<b>📋 持仓分析</b>"
-        ]
-        
-        for pa in position_analyses:
-            if pa.get('error'):
-                lines.append(f"⚠️ <b>{pa.get('name', pa.get('symbol'))}</b>: 分析失败")
-                continue
-            
-            decision = pa.get('final_decision', 'HOLD')
-            emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(decision, '⚪')
-            text = {'BUY': '买入', 'SELL': '卖出', 'HOLD': '持有'}.get(decision, '持有')
-            pnl = pa.get('pnl', 0)
-            pnl_pct = pa.get('pnl_percent', 0)
-            pnl_s = '+' if pnl >= 0 else ''
-            
-            lines.append(f"\n{emoji} <b>{pa.get('name', pa.get('symbol'))}</b> ({pa.get('market')}/{pa.get('symbol')})")
-            lines.append(f"   💰 ${pa.get('current_price', 0):.2f} | 盈亏: {pnl_s}${pnl:.2f} ({pnl_s}{pnl_pct:.1f}%)")
-            lines.append(f"   🎯 建议: <b>{text}</b> (置信度 {pa.get('confidence', 50)}%)")
-            
-            reasoning = pa.get('reasoning', '')
-            if reasoning:
-                lines.append(f"   📝 {reasoning[:150]}{'...' if len(reasoning) > 150 else ''}")
-        
-        if custom_prompt:
-            lines.extend(["", f"<b>👤 关注点:</b> {custom_prompt}"])
-        
-        lines.extend([
-            "",
-            "─────────────────────",
-            f"<i>⏰ {time.strftime('%Y-%m-%d %H:%M')}</i>",
-            "<i>由 QuantDinger 多智能体系统生成</i>"
         ])
     else:
-        lines = [
-            "<b>📊 Portfolio AI Analysis Report</b>",
-            "",
-            "<b>📈 Overview</b>",
-            f"• Positions: {len(positions)}",
-            f"• Total Cost: ${total_cost:,.2f}",
-            f"• Total P&L: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_percent:.1f}%)",
+        lines = ["<b>📊 AI Asset Analysis Report</b>", ""]
+        overview = ["<b>📈 Overview</b>"]
+        if held:
+            overview.append(f"• Holdings: {len(held)}")
+            overview.append(f"• Total Cost: ${total_cost:,.2f}")
+            overview.append(f"• Total P&L: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_pct:.1f}%)")
+        if watched:
+            overview.append(f"• Watchlist: {len(watched)}")
+        lines.extend(overview)
+        lines.extend([
             "",
             "<b>🤖 AI Recommendations</b>",
             f"🟢 Buy: {buy_count} | 🔴 Sell: {sell_count} | 🟡 Hold: {hold_count}",
-            "",
-            "<b>📋 Position Analysis</b>"
-        ]
-        
-        for pa in position_analyses:
-            if pa.get('error'):
-                lines.append(f"⚠️ <b>{pa.get('name', pa.get('symbol'))}</b>: Analysis failed")
-                continue
-            
-            decision = pa.get('final_decision', 'HOLD')
-            emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(decision, '⚪')
+        ])
+
+    # ── Helper: render one analysis entry ──
+    def _render_pa(pa: Dict[str, Any], show_pnl: bool) -> None:
+        decision = pa.get('final_decision', 'HOLD')
+        emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(decision, '⚪')
+        d_text = decision
+        if is_zh:
+            d_text = {'BUY': '买入', 'SELL': '卖出', 'HOLD': '持有'}.get(decision, '持有')
+        lines.append(f"\n{emoji} <b>{pa.get('name', pa.get('symbol'))}</b> ({pa.get('market')}/{pa.get('symbol')})")
+        if show_pnl:
             pnl = pa.get('pnl', 0)
             pnl_pct = pa.get('pnl_percent', 0)
-            pnl_s = '+' if pnl >= 0 else ''
-            
-            lines.append(f"\n{emoji} <b>{pa.get('name', pa.get('symbol'))}</b> ({pa.get('market')}/{pa.get('symbol')})")
-            lines.append(f"   💰 ${pa.get('current_price', 0):.2f} | P&L: {pnl_s}${pnl:.2f} ({pnl_s}{pnl_pct:.1f}%)")
-            lines.append(f"   🎯 Rec: <b>{decision}</b> (Conf: {pa.get('confidence', 50)}%)")
-            
+            ps = '+' if pnl >= 0 else ''
+            lines.append(
+                f"   💰 ${pa.get('current_price', 0):,.2f} | "
+                f"{'盈亏' if is_zh else 'P&L'}: {ps}${pnl:,.2f} ({ps}{pnl_pct:.1f}%)"
+            )
+        else:
+            lines.append(f"   💰 {'现价' if is_zh else 'Price'}: ${pa.get('current_price', 0):,.2f}")
+        lines.append(
+            f"   🎯 {'建议' if is_zh else 'Rec'}: <b>{d_text}</b> "
+            f"({'置信度' if is_zh else 'Conf'}: {pa.get('confidence', 50)}%)"
+        )
+        reasoning = pa.get('reasoning', '')
+        if reasoning:
+            lines.append(f"   📝 {reasoning[:150]}{'...' if len(reasoning) > 150 else ''}")
+
+    # ── Holdings section ──
+    if held:
+        lines.extend(["", f"<b>📋 {'持仓分析' if is_zh else 'Holdings'}</b>"])
+        for pa in held:
+            _render_pa(pa, show_pnl=True)
+
+    # ── Watchlist section ──
+    if watched:
+        lines.extend(["", f"<b>👁 {'观察列表' if is_zh else 'Watchlist'}</b>"])
+        for pa in watched:
+            _render_pa(pa, show_pnl=False)
+
+    # ── Errors ──
+    for pa in errored:
+        label = pa.get('name') or pa.get('symbol') or '?'
+        lines.append(f"\n⚠️ <b>{label}</b>: {'分析失败' if is_zh else 'Analysis failed'}")
+
+    if custom_prompt:
+        lines.extend(["", f"<b>👤 {'关注点' if is_zh else 'Focus'}:</b> {custom_prompt}"])
+
+    lines.extend([
+        "",
+        "─────────────────────",
+        f"<i>⏰ {time.strftime('%Y-%m-%d %H:%M')}</i>",
+        f"<i>{'由 QuantDinger 多智能体系统生成' if is_zh else 'Generated by QuantDinger Multi-Agent System'}</i>",
+    ])
+
+    return '\n'.join(lines)
+
+
+def _build_batch_telegram_report(
+    monitor_results: List[Dict[str, Any]],
+    language: str,
+) -> str:
+    """Build a single Telegram report that combines multiple monitor results."""
+    is_zh = language.startswith('zh')
+
+    def _has_holding(pa: Dict[str, Any]) -> bool:
+        return float(pa.get('quantity') or 0) > 0 and float(pa.get('entry_price') or 0) > 0
+
+    all_analyses: List[Dict[str, Any]] = []
+    monitor_sections: List[str] = []
+
+    for res in monitor_results:
+        meta = res.get('_meta', {})
+        m_name = meta.get('monitor_name', '?')
+        m_analyses = meta.get('position_analyses', [])
+        all_analyses.extend(m_analyses)
+
+        section_lines: List[str] = [f"\n<b>📋 {m_name}</b>"]
+        for pa in m_analyses:
+            if pa.get('error'):
+                label = pa.get('name') or pa.get('symbol') or '?'
+                section_lines.append(f"  ⚠️ {label}: {'分析失败' if is_zh else 'Failed'}")
+                continue
+            decision = pa.get('final_decision', 'HOLD')
+            emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(decision, '⚪')
+            d_text = ({'BUY': '买入', 'SELL': '卖出', 'HOLD': '持有'}.get(decision, '持有')) if is_zh else decision
+            cur_price = pa.get('current_price', 0)
+            section_lines.append(
+                f"{emoji} <b>{pa.get('name', pa.get('symbol'))}</b> ({pa.get('market')}/{pa.get('symbol')})"
+            )
+            if _has_holding(pa):
+                pnl = pa.get('pnl', 0)
+                pnl_s = '+' if pnl >= 0 else ''
+                pnl_pct = pa.get('pnl_percent', 0)
+                section_lines.append(
+                    f"   💰 ${cur_price:,.2f} | {'盈亏' if is_zh else 'P&L'}: {pnl_s}${pnl:,.2f} ({pnl_s}{pnl_pct:.1f}%)"
+                )
+            else:
+                section_lines.append(f"   💰 {'现价' if is_zh else 'Price'}: ${cur_price:,.2f}")
+            section_lines.append(
+                f"   🎯 {'建议' if is_zh else 'Rec'}: <b>{d_text}</b> "
+                f"({'置信度' if is_zh else 'Conf'}: {pa.get('confidence', 50)}%)"
+            )
             reasoning = pa.get('reasoning', '')
             if reasoning:
-                lines.append(f"   📝 {reasoning[:150]}{'...' if len(reasoning) > 150 else ''}")
-        
-        if custom_prompt:
-            lines.extend(["", f"<b>👤 Focus:</b> {custom_prompt}"])
-        
-        lines.extend([
+                section_lines.append(f"   📝 {reasoning[:120]}{'...' if len(reasoning) > 120 else ''}")
+        monitor_sections.append('\n'.join(section_lines))
+
+    held = [a for a in all_analyses if _has_holding(a) and not a.get('error')]
+    watched = [a for a in all_analyses if not _has_holding(a) and not a.get('error')]
+    total_cost = sum(float(a.get('entry_price', 0)) * float(a.get('quantity', 0)) for a in held)
+    total_pnl = sum(float(a.get('pnl', 0)) for a in held)
+    total_pnl_pct = round(total_pnl / total_cost * 100, 2) if total_cost else 0
+    pnl_sign = '+' if total_pnl >= 0 else ''
+    buy_c = len([a for a in all_analyses if a.get('final_decision') == 'BUY'])
+    sell_c = len([a for a in all_analyses if a.get('final_decision') == 'SELL'])
+    hold_c = len([a for a in all_analyses if a.get('final_decision') == 'HOLD'])
+
+    if is_zh:
+        header = [
+            "<b>📊 定时资产监测报告</b>",
             "",
-            "─────────────────────",
-            f"<i>⏰ {time.strftime('%Y-%m-%d %H:%M')}</i>",
-            "<i>Generated by QuantDinger Multi-Agent System</i>"
+            "<b>📈 综合概览</b>",
+            f"• 监控任务: {len(monitor_results)} 个",
+            f"• 标的数量: {len(all_analyses)} 个",
+        ]
+        if held:
+            header.append(f"• 持仓: {len(held)} 个 | 总成本: ${total_cost:,.2f} | 盈亏: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_pct:.1f}%)")
+        if watched:
+            header.append(f"• 观察: {len(watched)} 个")
+        header.extend([
+            "",
+            "<b>🤖 AI建议汇总</b>",
+            f"🟢 买入: {buy_c} | 🔴 卖出: {sell_c} | 🟡 持有: {hold_c}",
         ])
-    
-    return '\n'.join(lines)
+    else:
+        header = [
+            "<b>📊 Scheduled Portfolio Report</b>",
+            "",
+            "<b>📈 Summary</b>",
+            f"• Monitors: {len(monitor_results)}",
+            f"• Symbols: {len(all_analyses)}",
+        ]
+        if held:
+            header.append(f"• Holdings: {len(held)} | Cost: ${total_cost:,.2f} | P&L: {pnl_sign}${total_pnl:,.2f} ({pnl_sign}{total_pnl_pct:.1f}%)")
+        if watched:
+            header.append(f"• Watchlist: {len(watched)}")
+        header.extend([
+            "",
+            "<b>🤖 AI Recommendations</b>",
+            f"🟢 Buy: {buy_c} | 🔴 Sell: {sell_c} | 🟡 Hold: {hold_c}",
+        ])
+
+    footer = [
+        "",
+        "─────────────────────",
+        f"<i>⏰ {time.strftime('%Y-%m-%d %H:%M')}</i>",
+        f"<i>{'由 QuantDinger 多智能体系统生成' if is_zh else 'Generated by QuantDinger Multi-Agent System'}</i>",
+    ]
+
+    return '\n'.join(header + monitor_sections + footer)
+
+
+def _build_batch_html_report(
+    monitor_results: List[Dict[str, Any]],
+    language: str,
+) -> str:
+    """Build a combined HTML report for browser / email channel."""
+    parts: List[str] = []
+    for res in monitor_results:
+        report = res.get('analysis', '')
+        if report:
+            parts.append(report)
+    if not parts:
+        return ''
+    if len(parts) == 1:
+        return parts[0]
+    divider = '<hr style="border:none;border-top:1px solid #e8e8e8;margin:24px 0;">'
+    return divider.join(parts)
+
+
+def _send_batch_notification(
+    user_id: int,
+    monitor_results: List[Dict[str, Any]],
+) -> None:
+    """Send a single combined notification for multiple monitor results belonging to one user."""
+    if not monitor_results:
+        return
+
+    successful = [r for r in monitor_results if r.get('success')]
+    if not successful:
+        for r in monitor_results:
+            meta = r.get('_meta', {})
+            _send_monitor_notification(
+                monitor_name=meta.get('monitor_name', '?'),
+                result=r,
+                notification_config=meta.get('notification_config', {}),
+                positions=meta.get('positions', []),
+                position_analyses=meta.get('position_analyses', []),
+                language=meta.get('language', 'en-US'),
+                custom_prompt=meta.get('custom_prompt', ''),
+                user_id=user_id,
+            )
+        return
+
+    first_meta = successful[0].get('_meta', {})
+    language = first_meta.get('language', 'en-US')
+
+    # Merge channels from all monitors (union)
+    all_channels: set = set()
+    for r in successful:
+        m = r.get('_meta', {})
+        nc = m.get('notification_config', {})
+        chs = nc.get('channels')
+        if isinstance(chs, str):
+            chs = [chs]
+        elif not isinstance(chs, list):
+            chs = []
+        for c in chs:
+            if c:
+                all_channels.add(str(c).strip().lower())
+    if not all_channels:
+        all_channels = {'browser'}
+
+    merged_nc = {'channels': list(all_channels), 'targets': {}}
+    resolved_nc = _resolve_notification_delivery(user_id, merged_nc)
+    channels = resolved_nc.get('channels') or ['browser']
+    targets = resolved_nc.get('targets', {})
+
+    is_zh = language.startswith('zh')
+    names = ', '.join(r.get('_meta', {}).get('monitor_name', '?') for r in successful)
+    title = f"📊 定时资产监测: {names}" if is_zh else f"📊 Scheduled Report: {names}"
+    if len(title) > 255:
+        title = title[:252] + '...'
+
+    html_report = _build_batch_html_report(successful, language)
+    telegram_report = _build_batch_telegram_report(successful, language)
+
+    try:
+        notifier = SignalNotifier()
+        for channel in channels:
+            try:
+                ch = str(channel).strip().lower()
+                if ch == 'browser':
+                    with get_db_connection() as db:
+                        cur = db.cursor()
+                        cur.execute(
+                            """
+                            INSERT INTO qd_strategy_notifications
+                            (user_id, strategy_id, symbol, signal_type, channels, title, message, payload_json, created_at)
+                            VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NOW())
+                            """,
+                            (user_id, 'PORTFOLIO', 'ai_monitor', 'browser', title, html_report,
+                             json.dumps({'batch': True, 'count': len(successful)}, ensure_ascii=False, default=str)),
+                        )
+                        db.commit()
+                        cur.close()
+                elif ch == 'telegram':
+                    chat_id = targets.get('telegram', '')
+                    token_override = targets.get('telegram_bot_token', '')
+                    if chat_id:
+                        notifier._notify_telegram(
+                            chat_id=chat_id, text=telegram_report,
+                            token_override=token_override, parse_mode="HTML",
+                        )
+                elif ch == 'email':
+                    to_email = targets.get('email', '')
+                    if to_email:
+                        notifier._notify_email(
+                            to_email=to_email, subject=title,
+                            body_text=html_report, body_html=html_report,
+                        )
+                elif ch == 'webhook':
+                    url = targets.get('webhook', '')
+                    if url:
+                        notifier._notify_webhook(url=url, payload={
+                            'type': 'portfolio_monitor_batch',
+                            'monitors': [r.get('_meta', {}).get('monitor_name') for r in successful],
+                            'html_report': html_report,
+                        })
+            except Exception as e:
+                logger.warning(f"Batch notification channel {channel} failed: {e}")
+    except Exception as e:
+        logger.error(f"_send_batch_notification failed: {e}")
 
 
 def _send_monitor_notification(
@@ -748,14 +1112,19 @@ def _send_monitor_notification(
     try:
         notifier = SignalNotifier()
         effective_user_id = user_id if user_id is not None else DEFAULT_USER_ID
+        notification_config = _resolve_notification_delivery(effective_user_id, notification_config)
 
-        channels = notification_config.get('channels', ['browser'])
+        channels = notification_config.get('channels') or ['browser']
         targets = notification_config.get('targets', {})
 
         title = f"📊 资产监测: {monitor_name}" if language.startswith('zh') else f"📊 Portfolio Monitor: {monitor_name}"
+        if len(title) > 255:
+            title = title[:252] + '...'
         
         if not result.get('success'):
             error_title = f"⚠️ 资产监测失败: {monitor_name}" if language.startswith('zh') else f"⚠️ Monitor Failed: {monitor_name}"
+            if len(error_title) > 255:
+                error_title = error_title[:252] + '...'
             error_msg = f"分析失败: {result.get('error', 'Unknown error')}" if language.startswith('zh') else f"Analysis failed: {result.get('error', 'Unknown error')}"
             
             for channel in channels:
@@ -771,7 +1140,7 @@ def _send_monitor_notification(
                                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NOW())
                                 """,
                                 (effective_user_id, 'PORTFOLIO', 'ai_monitor', 'browser', error_title, error_msg,
-                                 json.dumps(result, ensure_ascii=False))
+                                 json.dumps(result, ensure_ascii=False, default=str))
                             )
                             db.commit()
                             cur.close()
@@ -818,7 +1187,7 @@ def _send_monitor_notification(
                             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NOW())
                             """,
                             (effective_user_id, 'PORTFOLIO', 'ai_monitor', 'browser', title, html_report,
-                             json.dumps(result, ensure_ascii=False))
+                             json.dumps(result, ensure_ascii=False, default=str))
                         )
                         db.commit()
                         cur.close()
@@ -866,19 +1235,23 @@ def _send_monitor_notification(
         logger.error(f"_send_monitor_notification failed: {e}")
 
 
-def run_single_monitor(monitor_id: int, override_language: str = None, user_id: int = None) -> Dict[str, Any]:
+def run_single_monitor(
+    monitor_id: int,
+    override_language: str = None,
+    user_id: int = None,
+    skip_notification: bool = False,
+) -> Dict[str, Any]:
     """Run a single monitor and return the result.
-    
+
     Args:
         monitor_id: The monitor ID to run
         override_language: Optional language override (e.g., 'zh-CN', 'en-US')
-                          If provided, will override the language in monitor config
         user_id: Optional user ID for user isolation
+        skip_notification: If True, do NOT send a notification (caller will batch-send later)
     """
     try:
-        # Use provided user_id or default
         effective_user_id = user_id if user_id is not None else DEFAULT_USER_ID
-        
+
         with get_db_connection() as db:
             cur = db.cursor()
             cur.execute(
@@ -894,46 +1267,78 @@ def run_single_monitor(monitor_id: int, override_language: str = None, user_id: 
 
         if not row:
             return {'success': False, 'error': 'Monitor not found'}
-        
+
         monitor_user_id = int(row.get('user_id') or effective_user_id)
         name = row.get('name') or f'Monitor #{monitor_id}'
         position_ids = _safe_json_loads(row.get('position_ids'), [])
         monitor_type = row.get('monitor_type') or 'ai'
         config = _safe_json_loads(row.get('config'), {})
         notification_config = _safe_json_loads(row.get('notification_config'), {})
-        
-        # Override language if provided (from frontend)
+
         if override_language:
             config['language'] = override_language
-        
-        # Resolve interval (frontend sends run_interval_minutes, legacy uses interval_minutes)
+
         interval_minutes = int(
             config.get('run_interval_minutes')
             or config.get('interval_minutes')
             or 60
         )
 
-        # Get positions (or build from config.symbol if no position_ids)
-        positions = _get_positions_for_monitor(position_ids if position_ids else None, user_id=monitor_user_id)
+        if position_ids:
+            positions = _get_positions_for_monitor(position_ids, user_id=monitor_user_id)
+        elif config.get('symbol'):
+            target_sym = config['symbol'].strip().upper()
+            target_mkt = (config.get('market') or '').strip()
 
-        # If monitor was created without positions but has symbol in config, build a virtual position
-        if not positions and config.get('symbol'):
-            positions = [{
-                'market': config.get('market', ''),
-                'symbol': config.get('symbol', ''),
-                'name': config.get('symbol', ''),
-                'side': 'long',
-                'quantity': 0,
-                'entry_price': 0,
-                'current_price': 0,
-                'pnl': 0,
-                'pnl_percent': 0,
-            }]
+            # Rule 4: symbol deleted from watchlist → skip
+            still_in_watchlist = False
+            try:
+                with get_db_connection() as db:
+                    cur = db.cursor()
+                    wl_sql = "SELECT 1 FROM qd_watchlist WHERE user_id = ? AND UPPER(symbol) = ?"
+                    wl_args: list = [monitor_user_id, target_sym]
+                    if target_mkt:
+                        wl_sql += " AND market = ?"
+                        wl_args.append(target_mkt)
+                    wl_sql += " LIMIT 1"
+                    cur.execute(wl_sql, tuple(wl_args))
+                    still_in_watchlist = cur.fetchone() is not None
+                    cur.close()
+            except Exception as e:
+                logger.warning(f"Monitor #{monitor_id} watchlist check failed: {e}")
+
+            if not still_in_watchlist:
+                logger.info(f"Monitor #{monitor_id} skipped: {target_mkt}:{target_sym} removed from watchlist")
+                return {'success': False, 'error': 'Symbol removed from watchlist'}
+
+            # Rules 1&2: match real position if exists, otherwise virtual observation
+            matched = _get_positions_for_monitor(None, user_id=monitor_user_id)
+            positions = [
+                p for p in matched
+                if (p.get('symbol') or '').strip().upper() == target_sym
+                and (not target_mkt or (p.get('market') or '').strip() == target_mkt)
+            ]
+            if not positions:
+                positions = [{
+                    'market': target_mkt,
+                    'symbol': config['symbol'].strip(),
+                    'name': config.get('name', config['symbol']).strip(),
+                    'side': 'long',
+                    'quantity': 0,
+                    'entry_price': 0,
+                    'current_price': 0,
+                    'pnl': 0,
+                    'pnl_percent': 0,
+                }]
+        else:
+            # Rule 5: no position_ids, no config.symbol → nothing to analyze
+            positions = []
 
         if not positions:
-            return {'success': False, 'error': 'No positions to analyze'}
-        
-        # ── Billing: charge per symbol analyzed ──
+            logger.info(f"Monitor #{monitor_id} skipped: no matching positions found")
+            return {'success': False, 'error': 'No matching positions found'}
+
+        # ── Billing ──
         billing = get_billing_service()
         symbol_count = len(positions)
         per_symbol_cost = billing.get_feature_cost('ai_analysis')
@@ -961,45 +1366,57 @@ def run_single_monitor(monitor_id: int, override_language: str = None, user_id: 
                     logger.warning(f"Monitor #{monitor_id} billing failed at symbol #{i+1}: {msg}")
                     break
 
-        # Run analysis based on type
         if monitor_type == 'ai':
-            result = _run_ai_analysis(positions, config)
+            result = _run_ai_analysis(positions, config, user_id=monitor_user_id)
         else:
             result = {'success': False, 'error': f'Unsupported monitor type: {monitor_type}'}
-        
+
         with get_db_connection() as db:
             cur = db.cursor()
             cur.execute(
                 """
                 UPDATE qd_position_monitors
-                SET last_run_at = NOW(), 
-                    next_run_at = NOW() + INTERVAL '%s minutes', 
-                    last_result = ?, 
-                    run_count = run_count + 1, 
+                SET last_run_at = NOW(),
+                    next_run_at = NOW() + INTERVAL '%s minutes',
+                    last_result = ?,
+                    run_count = run_count + 1,
                     updated_at = NOW()
                 WHERE id = ?
                 """,
-                (interval_minutes, json.dumps(result, ensure_ascii=False), monitor_id)
+                (interval_minutes, json.dumps(result, ensure_ascii=False, default=str), monitor_id)
             )
             db.commit()
             cur.close()
-        
-        # Send notification
-        if notification_config.get('channels'):
-            language = config.get('language', 'en-US')
-            custom_prompt = config.get('prompt', '')
-            position_analyses = result.get('position_analyses', [])
+
+        language = config.get('language', 'en-US')
+        custom_prompt = config.get('prompt', '')
+        position_analyses = result.get('position_analyses', [])
+        deduped_positions = result.get('positions', positions)
+
+        # Attach metadata used by batch notification / history
+        result['_meta'] = {
+            'monitor_id': monitor_id,
+            'monitor_name': name,
+            'user_id': monitor_user_id,
+            'language': language,
+            'custom_prompt': custom_prompt,
+            'notification_config': notification_config,
+            'positions': deduped_positions,
+            'position_analyses': position_analyses,
+        }
+
+        if not skip_notification:
             _send_monitor_notification(
                 monitor_name=name,
                 result=result,
                 notification_config=notification_config,
-                positions=positions,
+                positions=deduped_positions,
                 position_analyses=position_analyses,
                 language=language,
                 custom_prompt=custom_prompt,
-                user_id=monitor_user_id
+                user_id=monitor_user_id,
             )
-        
+
         return result
     except Exception as e:
         logger.error(f"run_single_monitor failed: {e}")
@@ -1132,9 +1549,10 @@ def _check_position_alerts():
                         db.commit()
                         cur.close()
                     
-                    # Send notification
-                    channels = notification_config.get('channels', ['browser'])
-                    targets = notification_config.get('targets', {})
+                    # Send notification（合并个人中心通知配置，与资产监控任务一致）
+                    resolved = _resolve_notification_delivery(alert_user_id, notification_config)
+                    channels = resolved.get('channels') or ['browser']
+                    targets = resolved.get('targets', {})
                     alert_title = _get_alert_title(alert_language)
                     
                     for channel in channels:
@@ -1254,15 +1672,17 @@ def notify_strategy_signal_for_positions(market: str, symbol: str, signal_type: 
 
 
 def _monitor_loop():
-    """Background loop that checks and runs due monitors."""
+    """Background loop that checks and runs due monitors.
+
+    All monitors due in the same cycle are executed first (with skip_notification),
+    then results are grouped by user_id and sent as one combined notification per user.
+    """
     logger.info("Portfolio monitor background loop started")
-    
+
     while not _stop_event.is_set():
         try:
-            # 1. Check position alerts (price/pnl alerts) for all users
             _check_position_alerts()
-            
-            # 2. Find AI monitors that are due for all users
+
             with get_db_connection() as db:
                 cur = db.cursor()
                 cur.execute(
@@ -1270,29 +1690,57 @@ def _monitor_loop():
                     SELECT id, user_id FROM qd_position_monitors
                     WHERE is_active = 1 AND next_run_at <= NOW()
                     ORDER BY next_run_at ASC
-                    LIMIT 10
+                    LIMIT 20
                     """
                 )
                 rows = cur.fetchall() or []
                 cur.close()
-            
+
+            # Collect results per user
+            user_results: Dict[int, List[Dict[str, Any]]] = {}
             for row in rows:
                 if _stop_event.is_set():
                     break
                 monitor_id = row.get('id')
                 monitor_user_id = int(row.get('user_id') or 1)
-                if monitor_id:
-                    logger.info(f"Running due monitor #{monitor_id} for user #{monitor_user_id}")
-                    try:
-                        run_single_monitor(monitor_id, user_id=monitor_user_id)
-                    except Exception as e:
-                        logger.error(f"Monitor #{monitor_id} execution failed: {e}")
+                if not monitor_id:
+                    continue
+                logger.info(f"Running due monitor #{monitor_id} for user #{monitor_user_id}")
+                try:
+                    result = run_single_monitor(
+                        monitor_id,
+                        user_id=monitor_user_id,
+                        skip_notification=True,
+                    )
+                    user_results.setdefault(monitor_user_id, []).append(result)
+                except Exception as e:
+                    logger.error(f"Monitor #{monitor_id} execution failed: {e}")
+
+            # Send one combined notification per user
+            for uid, results in user_results.items():
+                try:
+                    if len(results) == 1:
+                        meta = results[0].get('_meta', {})
+                        _send_monitor_notification(
+                            monitor_name=meta.get('monitor_name', '?'),
+                            result=results[0],
+                            notification_config=meta.get('notification_config', {}),
+                            positions=meta.get('positions', []),
+                            position_analyses=meta.get('position_analyses', []),
+                            language=meta.get('language', 'en-US'),
+                            custom_prompt=meta.get('custom_prompt', ''),
+                            user_id=uid,
+                        )
+                    else:
+                        _send_batch_notification(uid, results)
+                except Exception as e:
+                    logger.error(f"Batch notification for user #{uid} failed: {e}")
+
         except Exception as e:
             logger.error(f"Monitor loop error: {e}")
-        
-        # Sleep for 30 seconds before next check
+
         _stop_event.wait(30)
-    
+
     logger.info("Portfolio monitor background loop stopped")
 
 

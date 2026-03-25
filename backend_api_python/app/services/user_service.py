@@ -4,6 +4,7 @@ User Service - Multi-user management
 Handles user CRUD operations, password hashing, and role management.
 """
 import hashlib
+import re
 import time
 import os
 from typing import Optional, Dict, Any, List
@@ -11,6 +12,9 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# IANA timezone id subset check (e.g. Asia/Shanghai, America/New_York)
+_TIMEZONE_ID_RE = re.compile(r'^[A-Za-z0-9_/+\-.]+$')
 
 # Try to import bcrypt for secure password hashing
 try:
@@ -74,8 +78,8 @@ class UserService:
                 cur = db.cursor()
                 cur.execute(
                     """
-                    SELECT id, username, email, nickname, avatar, status, role, 
-                           credits, vip_expires_at, last_login_at, created_at, updated_at
+                    SELECT id, username, email, nickname, avatar, status, role,
+                           credits, vip_expires_at, timezone, last_login_at, created_at, updated_at
                     FROM qd_users WHERE id = ?
                     """,
                     (user_id,)
@@ -94,8 +98,8 @@ class UserService:
                 cur = db.cursor()
                 cur.execute(
                     """
-                    SELECT id, username, password_hash, email, nickname, avatar, 
-                           status, role, last_login_at, created_at, updated_at
+                    SELECT id, username, password_hash, email, nickname, avatar,
+                           status, role, timezone, last_login_at, created_at, updated_at
                     FROM qd_users WHERE username = ?
                     """,
                     (username,)
@@ -116,8 +120,8 @@ class UserService:
                 cur = db.cursor()
                 cur.execute(
                     """
-                    SELECT id, username, password_hash, email, nickname, avatar, 
-                           status, role, last_login_at, created_at, updated_at
+                    SELECT id, username, password_hash, email, nickname, avatar,
+                           status, role, timezone, last_login_at, created_at, updated_at
                     FROM qd_users WHERE LOWER(email) = LOWER(?)
                     """,
                     (email,)
@@ -340,7 +344,7 @@ class UserService:
             user_id: User ID
             data: Fields to update (email, nickname, avatar, role, status)
         """
-        allowed_fields = ['email', 'nickname', 'avatar', 'role', 'status']
+        allowed_fields = ['email', 'nickname', 'avatar', 'role', 'status', 'timezone']
         updates = []
         values = []
         
@@ -348,6 +352,13 @@ class UserService:
             if field in data:
                 value = data[field]
                 if field == 'role' and value not in self.ROLES:
+                    continue
+                if field == 'timezone':
+                    s = '' if value is None else str(value).strip()
+                    if s and (len(s) > 64 or not _TIMEZONE_ID_RE.match(s)):
+                        continue
+                    updates.append('timezone = ?')
+                    values.append(s)
                     continue
                 updates.append(f"{field} = ?")
                 values.append(value)
@@ -461,7 +472,7 @@ class UserService:
                 # Get users
                 query_sql = f"""
                     SELECT id, username, email, nickname, avatar, status, role,
-                           credits, vip_expires_at, last_login_at, created_at, updated_at
+                           credits, vip_expires_at, timezone, last_login_at, created_at, updated_at
                     FROM qd_users
                     {where_clause}
                     ORDER BY id DESC

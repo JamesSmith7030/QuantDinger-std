@@ -207,6 +207,7 @@ def login():
             'username': user.get('username', username),
             'nickname': user.get('nickname', 'User'),
             'avatar': user.get('avatar', '/avatar2.jpg'),
+            'timezone': str(user.get('timezone') or '').strip(),
             'role': {
                 'id': user.get('role', 'admin'),
                 'permissions': _get_permissions(user.get('role', 'admin'))
@@ -419,6 +420,7 @@ def login_with_code():
                     'nickname': user.get('nickname', user['username']),
                     'email': user.get('email'),
                     'avatar': user.get('avatar', '/avatar2.jpg'),
+                    'timezone': str(user.get('timezone') or '').strip(),
                     'role': {
                         'id': user.get('role', 'user'),
                         'permissions': _get_permissions(user.get('role', 'user'))
@@ -685,6 +687,7 @@ def register():
                     'nickname': username,
                     'email': email,
                     'avatar': '/avatar2.jpg',
+                    'timezone': '',
                     'role': {
                         'id': 'user',
                         'permissions': _get_permissions('user')
@@ -1049,6 +1052,7 @@ def get_user_info():
                     'nickname': user_data.get('nickname', 'User'),
                     'email': user_data.get('email'),
                     'avatar': user_data.get('avatar', '/avatar2.jpg'),
+                    'timezone': str(user_data.get('timezone') or '').strip(),
                     'role': {
                         'id': user_data.get('role', 'user'),
                         'permissions': _get_permissions(user_data.get('role', 'user'))
@@ -1065,6 +1069,7 @@ def get_user_info():
                 'username': username,
                 'nickname': 'Admin',
                 'avatar': '/avatar2.jpg',
+                'timezone': '',
                 'role': {
                     'id': role,
                     'permissions': _get_permissions(role)

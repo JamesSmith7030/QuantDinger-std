@@ -3,6 +3,7 @@ Portfolio API routes (local-only).
 Manages manual positions (user's existing holdings) and AI monitoring tasks.
 """
 from flask import Blueprint, request, jsonify, g
+from datetime import date, datetime, timezone
 import json
 import traceback
 import time
@@ -37,6 +38,27 @@ _last_request_time = {}  # {market: timestamp}
 
 def _now_ts() -> int:
     return int(time.time())
+
+
+def _serialize_monitor_ts(value):
+    """
+    JSON 序列化监控时间字段。PostgreSQL TIMESTAMP 无 tz 时按 UTC 解释（与 Docker 默认一致），
+    输出带 Z 的 ISO，避免前端把无时区字符串当本地时间而偏差 8 小时。
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            dt = value.replace(tzinfo=timezone.utc)
+        else:
+            dt = value.astimezone(timezone.utc)
+        s = dt.isoformat()
+        if s.endswith("+00:00"):
+            return s[:-6] + "Z"
+        return s
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -519,12 +541,12 @@ def get_monitors():
                 'config': _safe_json_loads(row.get('config'), {}),
                 'notification_config': _safe_json_loads(row.get('notification_config'), {}),
                 'is_active': bool(row.get('is_active')),
-                'last_run_at': row.get('last_run_at'),
-                'next_run_at': row.get('next_run_at'),
+                'last_run_at': _serialize_monitor_ts(row.get('last_run_at')),
+                'next_run_at': _serialize_monitor_ts(row.get('next_run_at')),
                 'last_result': _safe_json_loads(row.get('last_result'), {}),
                 'run_count': row.get('run_count') or 0,
-                'created_at': row.get('created_at'),
-                'updated_at': row.get('updated_at')
+                'created_at': _serialize_monitor_ts(row.get('created_at')),
+                'updated_at': _serialize_monitor_ts(row.get('updated_at'))
             })
 
         return jsonify({'code': 1, 'msg': 'success', 'data': monitors})
