@@ -2034,6 +2034,19 @@ class BacktestService:
                 self['amount'] = next_size
                 self['entry_price'] = next_price
 
+            def reduce_position(self, amount: float) -> None:
+                """Reduce position size by *amount*. Clears to flat when size reaches zero."""
+                reduce = float(amount or 0.0)
+                if reduce <= 0:
+                    return
+                current_size = float(self.get('size') or 0.0)
+                remaining = current_size - reduce
+                if remaining <= 1e-12:
+                    self.clear_position()
+                else:
+                    self['size'] = remaining
+                    self['amount'] = remaining
+
         class ScriptBacktestContext:
             def __init__(self, bars_df: pd.DataFrame, initial_balance: float):
                 self._bars_df = bars_df

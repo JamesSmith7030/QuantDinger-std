@@ -107,6 +107,10 @@ def load_addon_config() -> Dict[str, Any]:
         ('FINNHUB_TIMEOUT', 'finnhub.timeout', 'int'),
         ('FINNHUB_RATE_LIMIT', 'finnhub.rate_limit', 'int'),
 
+        # Crypto analytics
+        ('COINGLASS_API_KEY', 'coinglass.api_key', 'string'),
+        ('CRYPTOQUANT_API_KEY', 'cryptoquant.api_key', 'string'),
+
         # CCXT
         ('CCXT_DEFAULT_EXCHANGE', 'ccxt.default_exchange', 'string'),
         ('CCXT_TIMEOUT', 'ccxt.timeout', 'int'),

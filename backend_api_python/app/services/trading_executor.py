@@ -626,6 +626,7 @@ class TradingExecutor:
                 if is_grid_bot:
                     if ctx.position < 0:
                         out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.reduce_position(pos_ratio)
                     elif ctx.position == 0:
                         out.append({'type': 'open_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
                         ctx.position.open_position('long', order_price or trig, pos_ratio)
@@ -648,6 +649,7 @@ class TradingExecutor:
                 if is_grid_bot:
                     if ctx.position > 0:
                         out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.reduce_position(pos_ratio)
                     elif ctx.position == 0:
                         out.append({'type': 'open_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
                         ctx.position.open_position('short', order_price or trig, pos_ratio)
@@ -760,21 +762,14 @@ class TradingExecutor:
                 logger.warning(f"Strategy {strategy_id} invalid leverage format, reset to 1: {trading_config.get('leverage')}")
                 leverage = 1.0
             
-            # 获取市场类型，默认为合约
-            # 根据杠杆自动判断：杠杆=1为现货，杠杆>1为合约
+            # 获取市场类型，严格以策略配置为准，不再通过杠杆反推。
             market_type = trading_config.get('market_type', 'swap')
             if market_type not in ['swap', 'spot']:
                 logger.error(f"Strategy {strategy_id} invalid market_type={market_type} (only swap/spot supported); refusing to start")
                 return
-            
-            # 根据杠杆自动调整市场类型
-            if leverage == 1.0:
-                market_type = 'spot'  # 现货固定1倍杠杆
-                logger.info(f"Strategy {strategy_id} leverage=1; auto-switch market_type to spot")
-            else:
-                # 合约市场：统一使用 swap（永续），避免 futures/delivery 混淆导致持仓/下单查错市场
-                market_type = 'swap'
-                logger.info(f"Strategy {strategy_id} derivatives trading; normalize market_type to: {market_type}")
+            if market_type == 'swap':
+                # 合约市场统一使用 swap（永续），避免 futures/delivery 混淆导致持仓/下单查错市场
+                logger.info(f"Strategy {strategy_id} derivatives trading; normalize market_type to: swap")
             
             # 根据市场类型限制杠杆
             if market_type == 'spot':
@@ -1205,6 +1200,11 @@ class TradingExecutor:
                         # 检查价格是否触发
                         triggered = False
 
+                        # Bot-mode scripts (grid / DCA / martingale) handle their own
+                        # timing inside on_bar; execute signals immediately.
+                        if is_bot_mode:
+                            triggered = True
+
                         # 【关键修复】平仓/止损止盈信号默认“立即触发”
                         exit_trigger_mode = trading_config.get('exit_trigger_mode', 'immediate')  # 'immediate' or 'price'
                         if signal_type in ['close_long', 'close_short'] and exit_trigger_mode == 'immediate':
@@ -1272,8 +1272,13 @@ class TradingExecutor:
                         # Strict state machine + priority:
                         # - Only allow signals matching current state (flat/long/short).
                         # - Always prefer close_* over open_*/add_*.
-                        # - Execute at most ONE signal per tick to avoid duplicated/re-entrant orders.
-                        candidates = [s for s in triggered_signals if self._is_signal_allowed(state, s.get('type'))]
+                        # - Bot-mode may need multiple state transitions in one tick
+                        #   (e.g. grid partial take-profit / reverse across levels),
+                        #   while indicator mode still executes at most one signal.
+                        if is_bot_mode:
+                            candidates = list(triggered_signals)
+                        else:
+                            candidates = [s for s in triggered_signals if self._is_signal_allowed(state, s.get('type'))]
 
                         # If both directions are present while flat, choose by trade_direction (deterministic).
                         if state == "flat" and candidates:
@@ -1292,12 +1297,12 @@ class TradingExecutor:
                             ),
                         )
 
-                        selected = None
                         now_i = int(time.time())
+                        execution_batch: List[Dict[str, Any]] = []
                         for s in candidates:
                             stype = s.get("type")
                             sts = int(s.get("timestamp") or 0)
-                            if self._should_skip_signal_once_per_candle(
+                            if (not is_bot_mode) and self._should_skip_signal_once_per_candle(
                                 strategy_id=strategy_id,
                                 symbol=symbol,
                                 signal_type=str(stype or ""),
@@ -1306,15 +1311,20 @@ class TradingExecutor:
                                 now_ts=now_i,
                             ):
                                 continue
-                            selected = s
-                            break
+                            execution_batch.append(s)
+                            if not is_bot_mode:
+                                break
 
-                        if selected:
+                        for selected in execution_batch:
                             signal_type = selected.get('type')
                             position_size = selected.get('position_size', 0)
                             trigger_price = selected.get('trigger_price', current_price)
                             execute_price = trigger_price if trigger_price > 0 else current_price
                             signal_ts = int(selected.get("timestamp") or 0)
+                            current_positions = self._get_current_positions(strategy_id, symbol)
+
+                            if not self._is_signal_allowed(self._position_state(current_positions), signal_type):
+                                continue
 
                             ok = self._execute_signal(
                                 strategy_id=strategy_id,
@@ -1418,7 +1428,7 @@ class TradingExecutor:
                         initial_capital, leverage, decide_interval,
                         execution_mode, notification_config,
                         indicator_config, exchange_config, trading_config, ai_model_config,
-                        market_category, strategy_code
+                        market_category, strategy_mode, strategy_code
                     FROM qd_strategies_trading
                     WHERE id = %s
                 """
@@ -2433,24 +2443,35 @@ class TradingExecutor:
             
             amount = 0.0
 
+            bot_type = (trading_config or {}).get('bot_type', '')
+            is_bot_script = bool(bot_type)
+
             # Frontend position sizing alignment:
-            # - open_* uses entry_pct from trading_config if provided (0~1 or 0~100 are both accepted)
-            if sig in ("open_long", "open_short") and isinstance(trading_config, dict):
+            # - non-bot open_* uses entry_pct from trading_config if provided
+            # - bot scripts pass their own amount/ratio from ctx.buy()/ctx.sell()
+            if (not is_bot_script) and sig in ("open_long", "open_short") and isinstance(trading_config, dict):
                 ep = trading_config.get("entry_pct")
                 if ep is not None:
                     position_size = self._to_ratio(ep, default=position_size if position_size is not None else 0.0)
 
-            # Open / add sizing: position_size is treated as capital ratio in [0,1].
+            # Open / add sizing
             if ('open' in sig or 'add' in sig):
                  if position_size is None or float(position_size) <= 0:
                      position_size = 0.05
-                 position_ratio = self._to_ratio(position_size, default=0.05)
-                 if market_type == 'spot':
-                     amount = available_capital * position_ratio / current_price
+
+                 if is_bot_script and float(position_size) > 1.0:
+                     # Bot scripts pass amount as absolute USDT notional, not ratio.
+                     usdt_notional = float(position_size)
+                     if market_type == 'spot':
+                         amount = usdt_notional / current_price
+                     else:
+                         amount = (usdt_notional * leverage) / current_price
                  else:
-                     # Futures sizing: treat available_capital as margin budget.
-                     # Notional = margin * leverage, so base quantity = (margin * leverage) / price.
-                     amount = (available_capital * position_ratio * leverage) / current_price
+                     position_ratio = self._to_ratio(position_size, default=0.05)
+                     if market_type == 'spot':
+                         amount = available_capital * position_ratio / current_price
+                     else:
+                         amount = (available_capital * position_ratio * leverage) / current_price
 
             # Reduce sizing: position_size is treated as a reduce ratio (close X% of current position).
             if sig in ("reduce_long", "reduce_short"):
@@ -2476,13 +2497,25 @@ class TradingExecutor:
 
             # 4. Execute order enqueue (PendingOrderWorker will dispatch notifications in signal mode)
             if 'close' in sig:
-                # 平仓逻辑：找到对应持仓大小
-                pos = next((p for p in current_positions if p.get('side') and p['side'] in signal_type), None)
+                pos_side = 'long' if 'long' in sig else 'short'
+                pos = next((p for p in current_positions if (p.get('side') or '').strip().lower() == pos_side), None)
                 if not pos:
                     return False
-                amount = float(pos['size'] or 0.0)
-                if amount <= 0:
+                full_size = float(pos.get('size') or 0.0)
+                if full_size <= 0:
                     return False
+
+                if is_bot_script and position_size is not None and float(position_size) > 1.0 and current_price > 0:
+                    usdt_notional = float(position_size)
+                    close_qty = (usdt_notional * leverage) / current_price if market_type != 'spot' else usdt_notional / current_price
+                    if close_qty < full_size * 0.99:
+                        amount = close_qty
+                        sig = f"reduce_{pos_side}"
+                        signal_type = sig
+                    else:
+                        amount = full_size
+                else:
+                    amount = full_size
 
             if amount <= 0 and ('open' in signal_type or 'add' in signal_type):
                 return False

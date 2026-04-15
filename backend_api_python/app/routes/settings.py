@@ -391,6 +391,24 @@ CONFIG_SCHEMA = {
                 'description': 'Finnhub API key for US stock data (free tier available)'
             },
             {
+                'key': 'COINGLASS_API_KEY',
+                'label': 'Coinglass API Key',
+                'type': 'password',
+                'required': False,
+                'link': 'https://docs.coinglass.com/reference/getting-started-with-your-api',
+                'link_text': 'settings.link.getApiKey',
+                'description': 'Coinglass API key for crypto derivatives, funding rate, long/short ratio, and exchange flow data. Open the official docs to view signup and key management instructions.'
+            },
+            {
+                'key': 'CRYPTOQUANT_API_KEY',
+                'label': 'CryptoQuant API Key',
+                'type': 'password',
+                'required': False,
+                'link': 'https://cryptoquant.com/docs',
+                'link_text': 'settings.link.getApiKey',
+                'description': 'CryptoQuant API key for on-chain and stablecoin flow metrics used in crypto AI analysis. API access is tied to paid plans; see the official docs for activation details.'
+            },
+            {
                 'key': 'TIINGO_API_KEY',
                 'label': 'Tiingo API Key',
                 'type': 'password',

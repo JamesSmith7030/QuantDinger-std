@@ -87,3 +87,48 @@ output = {'name': 'T', 'plots': [], 'signals': []}
 """
     hints = analyze_indicator_code_quality(code)
     assert any(h["code"] == "UNKNOWN_STRATEGY_KEY" for h in hints)
+
+
+def test_declared_params_must_be_read_via_params_get():
+    code = """
+my_indicator_name = "T"
+my_indicator_description = "D"
+# @param fast_period int 10 Fast MA
+df = df.copy()
+ma = df['close'].rolling(window=fast_period).mean()
+df['buy'] = False
+df['sell'] = False
+output = {'name': 'T', 'plots': [], 'signals': []}
+"""
+    hints = analyze_indicator_code_quality(code)
+    assert any(h["code"] == "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET" for h in hints)
+
+
+def test_declared_params_read_via_params_get_is_ok():
+    code = """
+my_indicator_name = "T"
+my_indicator_description = "D"
+# @param fast_period int 10 Fast MA
+fast_period = params.get('fast_period', 10)
+df = df.copy()
+ma = df['close'].rolling(window=fast_period).mean()
+df['buy'] = False
+df['sell'] = False
+output = {'name': 'T', 'plots': [], 'signals': []}
+"""
+    hints = analyze_indicator_code_quality(code)
+    assert not any(h["code"] == "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET" for h in hints)
+
+
+def test_where_none_signal_markers_warned():
+    code = """
+my_indicator_name = "T"
+my_indicator_description = "D"
+df = df.copy()
+df['buy'] = False
+df['sell'] = False
+buy_prices = df['close'].where(df['buy'], None).tolist()
+output = {'name': 'T', 'plots': [], 'signals': [{'type': 'buy', 'data': buy_prices}]}
+"""
+    hints = analyze_indicator_code_quality(code)
+    assert any(h["code"] == "SIGNAL_MARKERS_USE_WHERE_NONE" for h in hints)

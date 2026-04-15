@@ -107,7 +107,37 @@ class UserService:
                 cur.execute(
                     """
                     SELECT id, username, email, nickname, avatar, status, role,
-                           credits, vip_expires_at, timezone, last_login_at, created_at, updated_at
+                           credits, vip_expires_at, timezone,
+                           COALESCE(
+                               qd_users.last_login_at,
+                               (
+                                   SELECT MAX(sl.created_at)
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('login_success', 'login_via_code', 'oauth_login')
+                               )
+                           ) AS last_login_at,
+                           COALESCE(
+                               (
+                                   SELECT sl.ip_address
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('register', 'register_via_code')
+                                     AND COALESCE(sl.ip_address, '') <> ''
+                                   ORDER BY sl.created_at ASC
+                                   LIMIT 1
+                               ),
+                               (
+                                   SELECT sl.ip_address
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('oauth_login', 'login_success', 'login_via_code')
+                                     AND COALESCE(sl.ip_address, '') <> ''
+                                   ORDER BY sl.created_at ASC
+                                   LIMIT 1
+                               )
+                           ) AS register_ip,
+                           created_at, updated_at
                     FROM qd_users WHERE id = ?
                     """,
                     (user_id,)
@@ -514,7 +544,37 @@ class UserService:
                 # Get users
                 query_sql = f"""
                     SELECT id, username, email, nickname, avatar, status, role,
-                           credits, vip_expires_at, timezone, last_login_at, created_at, updated_at
+                           credits, vip_expires_at, timezone,
+                           COALESCE(
+                               qd_users.last_login_at,
+                               (
+                                   SELECT MAX(sl.created_at)
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('login_success', 'login_via_code', 'oauth_login')
+                               )
+                           ) AS last_login_at,
+                           COALESCE(
+                               (
+                                   SELECT sl.ip_address
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('register', 'register_via_code')
+                                     AND COALESCE(sl.ip_address, '') <> ''
+                                   ORDER BY sl.created_at ASC
+                                   LIMIT 1
+                               ),
+                               (
+                                   SELECT sl.ip_address
+                                   FROM qd_security_logs sl
+                                   WHERE sl.user_id = qd_users.id
+                                     AND sl.action IN ('oauth_login', 'login_success', 'login_via_code')
+                                     AND COALESCE(sl.ip_address, '') <> ''
+                                   ORDER BY sl.created_at ASC
+                                   LIMIT 1
+                               )
+                           ) AS register_ip,
+                           created_at, updated_at
                     FROM qd_users
                     {where_clause}
                     ORDER BY id DESC

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS qd_users (
     email_verified BOOLEAN DEFAULT FALSE,  -- 邮箱是否已验证
     referred_by INTEGER,                   -- 邀请人ID
     notification_settings TEXT DEFAULT '', -- 用户通知配置 JSON (telegram_chat_id, default_channels等)
+    chart_templates TEXT DEFAULT '',      -- 用户图表模板 JSON（指标布局/样式）
     timezone VARCHAR(64) DEFAULT '',       -- IANA 时区标识，空表示跟随客户端/浏览器
     token_version INTEGER DEFAULT 1,       -- Token版本号，用于单一客户端登录控制
     last_login_at TIMESTAMP,

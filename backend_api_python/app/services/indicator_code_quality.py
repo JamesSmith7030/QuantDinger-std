@@ -42,6 +42,26 @@ def _has_df_copy(code: str) -> bool:
     return bool(re.search(r"df\s*=\s*df\.copy\s*\(\s*\)", code or ""))
 
 
+def _declared_param_names(code: str) -> List[str]:
+    names: List[str] = []
+    for m in re.finditer(
+        r"^\s*#\s*@param\s+(\w+)\s+(int|float|bool|str|string)\s+\S+",
+        code or "",
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        names.append(m.group(1))
+    return names
+
+
+def _uses_params_get(code: str, name: str) -> bool:
+    pattern = rf"params\s*\.?\s*get\s*\(\s*['\"]{re.escape(name)}['\"]\s*,?"
+    return bool(re.search(pattern, code or ""))
+
+
+def _uses_where_none_for_markers(code: str) -> bool:
+    return bool(re.search(r"\.where\s*\([^)]*,\s*None\s*\)\s*\.tolist\s*\(", code or ""))
+
+
 def _unknown_strategy_keys(code: str) -> List[str]:
     valid = set(StrategyConfigParser.VALID_KEYS.keys())
     unknown: List[str] = []
@@ -81,6 +101,27 @@ def analyze_indicator_code_quality(code: str) -> List[Dict[str, Any]]:
     trading = _has_df_buy_sell(raw)
     if not trading:
         hints.append({"severity": "warn", "code": "MISSING_BUY_SELL_COLUMNS", "params": {}})
+
+    declared_params = _declared_param_names(raw)
+    if declared_params:
+        unread = [name for name in declared_params if not _uses_params_get(raw, name)]
+        if unread:
+            hints.append(
+                {
+                    "severity": "warn",
+                    "code": "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET",
+                    "params": {"names": unread},
+                }
+            )
+
+    if _uses_where_none_for_markers(raw):
+        hints.append(
+            {
+                "severity": "info",
+                "code": "SIGNAL_MARKERS_USE_WHERE_NONE",
+                "params": {},
+            }
+        )
 
     for bad_key in _unknown_strategy_keys(raw):
         hints.append(

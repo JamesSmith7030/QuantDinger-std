@@ -23,7 +23,7 @@ import numpy as np
 from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.auth import login_required
-from app.services.indicator_params import IndicatorCaller
+from app.services.indicator_params import IndicatorCaller, IndicatorParamsParser
 import requests
 
 logger = get_logger(__name__)
@@ -116,6 +116,255 @@ def _generate_mock_df(length=200):
         'volume': volume
     })
     return df
+
+
+def _merge_indicator_params(code: str, user_params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    declared_params = IndicatorParamsParser.parse_params(code or "")
+    return IndicatorParamsParser.merge_params(declared_params, user_params or {})
+
+
+def _validate_indicator_code_internal(code: str, user_params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    Shared validation for indicator code generation and verifyCode.
+
+    Returns:
+      {
+        "success": bool,
+        "msg": str,
+        "error_type": str | None,
+        "details": str | None,
+        "plots_count": int,
+        "signals_count": int,
+        "hints": [...]
+      }
+    """
+    from app.services.indicator_code_quality import analyze_indicator_code_quality
+    from app.utils.safe_exec import build_safe_builtins, safe_exec_with_validation
+
+    raw = (code or "").strip()
+    if not raw:
+        return {
+            "success": False,
+            "msg": "Code is empty",
+            "error_type": "EmptyCode",
+            "details": None,
+            "plots_count": 0,
+            "signals_count": 0,
+            "hints": [{"severity": "error", "code": "EMPTY_CODE", "params": {}}],
+        }
+
+    hints = analyze_indicator_code_quality(raw)
+    df = _generate_mock_df()
+    merged_params = _merge_indicator_params(raw, user_params)
+
+    exec_env = {
+        'df': df.copy(),
+        'pd': pd,
+        'np': np,
+        'params': merged_params,
+        'output': None,
+    }
+    exec_env['__builtins__'] = build_safe_builtins()
+
+    exec_result = safe_exec_with_validation(
+        code=raw,
+        exec_globals=exec_env,
+        exec_locals=exec_env,
+        timeout=20,
+    )
+    if not exec_result.get('success'):
+        error_detail = exec_result.get('error') or 'Unknown error'
+        is_security = error_detail.startswith('Unsafe code rejected')
+        return {
+            "success": False,
+            "msg": f"{'Security' if is_security else 'Runtime'} Error: {error_detail}",
+            "error_type": "SecurityError" if is_security else "RuntimeError",
+            "details": error_detail,
+            "plots_count": 0,
+            "signals_count": 0,
+            "hints": hints,
+        }
+
+    output = exec_env.get('output')
+    if output is None:
+        return {
+            "success": False,
+            "msg": "Missing 'output' variable. Your code must define an 'output' dictionary.",
+            "error_type": "MissingOutput",
+            "details": None,
+            "plots_count": 0,
+            "signals_count": 0,
+            "hints": hints,
+        }
+
+    if not isinstance(output, dict):
+        return {
+            "success": False,
+            "msg": f"'output' must be a dictionary, got {type(output).__name__}",
+            "error_type": "InvalidOutputType",
+            "details": None,
+            "plots_count": 0,
+            "signals_count": 0,
+            "hints": hints,
+        }
+
+    if 'plots' not in output and 'signals' not in output:
+        return {
+            "success": False,
+            "msg": "'output' dict should contain 'plots' or 'signals' list.",
+            "error_type": "InvalidOutputStructure",
+            "details": None,
+            "plots_count": 0,
+            "signals_count": 0,
+            "hints": hints,
+        }
+
+    plots = output.get('plots', [])
+    signals = output.get('signals', [])
+
+    for p in plots:
+        if 'data' not in p:
+            return {
+                "success": False,
+                "msg": f"Plot '{p.get('name')}' missing 'data' field.",
+                "error_type": "InvalidPlot",
+                "details": None,
+                "plots_count": len(plots),
+                "signals_count": len(signals),
+                "hints": hints,
+            }
+        if len(p['data']) != len(df):
+            return {
+                "success": False,
+                "msg": f"Plot '{p.get('name')}' data length ({len(p['data'])}) does not match DataFrame length ({len(df)}).",
+                "error_type": "LengthMismatch",
+                "details": None,
+                "plots_count": len(plots),
+                "signals_count": len(signals),
+                "hints": hints,
+            }
+
+    for s in signals:
+        if 'data' not in s:
+            return {
+                "success": False,
+                "msg": f"Signal '{s.get('type')}' missing 'data' field.",
+                "error_type": "InvalidSignal",
+                "details": None,
+                "plots_count": len(plots),
+                "signals_count": len(signals),
+                "hints": hints,
+            }
+        if len(s['data']) != len(df):
+            return {
+                "success": False,
+                "msg": f"Signal '{s.get('type')}' data length ({len(s['data'])}) does not match DataFrame length ({len(df)}).",
+                "error_type": "LengthMismatch",
+                "details": None,
+                "plots_count": len(plots),
+                "signals_count": len(signals),
+                "hints": hints,
+            }
+
+    return {
+        "success": True,
+        "msg": "Verification passed! Code executed successfully.",
+        "error_type": None,
+        "details": None,
+        "plots_count": len(plots),
+        "signals_count": len(signals),
+        "hints": hints,
+    }
+
+
+def _indicator_debug_summary(validation: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    validation = validation or {}
+    hints = validation.get("hints") or []
+    return {
+        "success": bool(validation.get("success")),
+        "message": validation.get("msg"),
+        "error_type": validation.get("error_type"),
+        "hint_codes": [h.get("code") for h in hints if h.get("code")],
+        "hint_count": len(hints),
+        "plots_count": validation.get("plots_count", 0),
+        "signals_count": validation.get("signals_count", 0),
+    }
+
+
+def _indicator_hint_to_text(hint_code: str, params: Dict[str, Any] | None = None) -> str:
+    params = params or {}
+    if hint_code == "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET":
+        names = params.get("names") or []
+        joined = "、".join(names) if names else "参数"
+        return f"已检测到声明的参数未通过 params.get(...) 读取：{joined}。"
+    if hint_code == "SIGNAL_MARKERS_USE_WHERE_NONE":
+        return "已检测到信号标记使用 where(..., None).tolist()，建议改为显式 None 列表以避免 NaN 渲染问题。"
+    if hint_code == "MISSING_OUTPUT":
+        return "缺少 output 字典。"
+    if hint_code == "MISSING_BUY_SELL_COLUMNS":
+        return "缺少 df['buy'] 或 df['sell'] 信号列。"
+    if hint_code == "MISSING_DF_COPY":
+        return "缺少 df = df.copy()。"
+    if hint_code == "MISSING_INDICATOR_NAME":
+        return "缺少 my_indicator_name。"
+    if hint_code == "MISSING_INDICATOR_DESCRIPTION":
+        return "缺少 my_indicator_description。"
+    if hint_code == "UNKNOWN_STRATEGY_KEY":
+        return f"存在未知的 @strategy 键：{params.get('key') or 'unknown'}。"
+    if hint_code == "NO_STRATEGY_ANNOTATIONS":
+        return "没有声明任何 @strategy 默认配置。"
+    if hint_code == "NO_STOP_AND_TAKE_PROFIT":
+        return "未声明止损和止盈默认配置。"
+    if hint_code == "NO_STOP_LOSS":
+        return "未声明止损默认配置。"
+    if hint_code == "NO_TAKE_PROFIT":
+        return "未声明止盈默认配置。"
+    return f"检测到代码提示：{hint_code}"
+
+
+def _indicator_human_summary(
+    initial_validation: Dict[str, Any],
+    final_validation: Dict[str, Any],
+    auto_fix_applied: bool,
+    auto_fix_succeeded: bool,
+    returned_candidate: str,
+) -> Dict[str, Any]:
+    initial_hints = initial_validation.get("hints") or []
+    final_hints = final_validation.get("hints") or []
+    initial_codes = {h.get("code") for h in initial_hints if h.get("code")}
+    final_codes = {h.get("code") for h in final_hints if h.get("code")}
+    fixed_codes = sorted(initial_codes - final_codes)
+    remaining_codes = sorted(final_codes)
+
+    fixed_messages = [
+        _indicator_hint_to_text(h.get("code"), h.get("params"))
+        for h in initial_hints
+        if h.get("code") in fixed_codes
+    ]
+    remaining_messages = [
+        _indicator_hint_to_text(h.get("code"), h.get("params"))
+        for h in final_hints
+        if h.get("code") in remaining_codes
+    ]
+
+    if auto_fix_applied and auto_fix_succeeded:
+        title = "AI 已自动修复并返回更稳定的指标代码"
+    elif auto_fix_applied:
+        title = "AI 尝试自动修复，但仍保留部分问题"
+    else:
+        title = "AI 已生成指标代码，并通过当前质检流程"
+
+    if returned_candidate == "repaired":
+        returned_text = "当前返回的是自动修复后的代码。"
+    else:
+        returned_text = "当前返回的是首次生成的代码。"
+
+    return {
+        "title": title,
+        "returned_text": returned_text,
+        "fixed_messages": fixed_messages,
+        "remaining_messages": remaining_messages,
+    }
 
 
 @indicator_bp.route("/getIndicators", methods=["GET"])
@@ -397,93 +646,25 @@ def verify_code():
         if not code or not str(code).strip():
             return jsonify({"code": 0, "msg": "Code is empty", "data": None}), 400
 
-        # 1. Generate mock data
-        df = _generate_mock_df()
-        
-        # 2. Prepare execution environment (sandboxed)
-        exec_env = {
-            'df': df.copy(),
-            'pd': pd,
-            'np': np,
-            'output': None
-        }
-
-        from app.utils.safe_exec import build_safe_builtins, safe_exec_with_validation
-
-        exec_env_sandbox = exec_env.copy()
-        exec_env_sandbox['__builtins__'] = build_safe_builtins()
-
-        exec_result = safe_exec_with_validation(
-            code=code,
-            exec_globals=exec_env_sandbox,
-            exec_locals=exec_env_sandbox,
-            timeout=20,
-        )
-
-        if not exec_result.get('success'):
-            error_detail = exec_result.get('error') or 'Unknown error'
-            is_security = error_detail.startswith('Unsafe code rejected')
+        validation = _validate_indicator_code_internal(code, data.get("params") or {})
+        if not validation["success"]:
             return jsonify({
                 "code": 0,
-                "msg": f"{'Security' if is_security else 'Runtime'} Error: {error_detail}",
-                "data": {"type": "SecurityError" if is_security else "RuntimeError", "details": error_detail}
+                "msg": validation["msg"],
+                "data": {
+                    "type": validation["error_type"],
+                    "details": validation["details"],
+                    "hints": validation.get("hints", []),
+                }
             })
-            
-        # 5. Check output
-        output = exec_env_sandbox.get('output')
-        
-        if output is None:
-            return jsonify({
-                "code": 0, 
-                "msg": "Missing 'output' variable. Your code must define an 'output' dictionary.", 
-                "data": {"type": "MissingOutput"}
-            })
-            
-        if not isinstance(output, dict):
-            return jsonify({
-                "code": 0, 
-                "msg": f"'output' must be a dictionary, got {type(output).__name__}", 
-                "data": {"type": "InvalidOutputType"}
-            })
-            
-        # Check required fields
-        if 'plots' not in output and 'signals' not in output:
-             return jsonify({
-                "code": 0, 
-                "msg": "'output' dict should contain 'plots' or 'signals' list.", 
-                "data": {"type": "InvalidOutputStructure"}
-            })
-            
-        # Basic check for lengths
-        plots = output.get('plots', [])
-        signals = output.get('signals', [])
-        
-        for p in plots:
-            if 'data' not in p:
-                return jsonify({"code": 0, "msg": f"Plot '{p.get('name')}' missing 'data' field.", "data": {"type": "InvalidPlot"}})
-            if len(p['data']) != len(df):
-                return jsonify({
-                    "code": 0, 
-                    "msg": f"Plot '{p.get('name')}' data length ({len(p['data'])}) does not match DataFrame length ({len(df)}).", 
-                    "data": {"type": "LengthMismatch"}
-                })
-                
-        for s in signals:
-            if 'data' not in s:
-                return jsonify({"code": 0, "msg": f"Signal '{s.get('type')}' missing 'data' field.", "data": {"type": "InvalidSignal"}})
-            if len(s['data']) != len(df):
-                return jsonify({
-                    "code": 0, 
-                    "msg": f"Signal '{s.get('type')}' data length ({len(s['data'])}) does not match DataFrame length ({len(df)}).", 
-                    "data": {"type": "LengthMismatch"}
-                })
 
         return jsonify({
-            "code": 1, 
-            "msg": "Verification passed! Code executed successfully.", 
+            "code": 1,
+            "msg": validation["msg"],
             "data": {
-                "plots_count": len(plots),
-                "signals_count": len(signals)
+                "plots_count": validation["plots_count"],
+                "signals_count": validation["signals_count"],
+                "hints": validation.get("hints", []),
             }
         })
 
@@ -589,6 +770,17 @@ Example: `# @param rsi_len int 14 RSI period`
 
 The runtime merges these with user-supplied params.
 
+**Critical:** `# @param` only declares parameters for the UI/runtime. It does **not**
+create Python variables automatically. If you declare:
+
+`# @param fast_period int 10 Fast MA period`
+
+you must read it explicitly in code, for example:
+
+`fast_period = params.get('fast_period', 10)`
+
+Never use declared parameter names directly unless you first assign them from `params`.
+
 # Strategy defaults: `# @strategy` (recommended)
 
 Place **after** name/description lines, **one key per line**, no extra prose on the same line:
@@ -614,6 +806,14 @@ Pick defaults that match the strategy style (trend vs mean-reversion).
 - Prefer clear variable names, short comments only where non-obvious.
 - Ensure at least some `buy` and some `sell` True in typical ranges unless the user asked for a rare signal; if logic is too strict, widen thresholds.
 - If the user asks for “display only” with no trading, still set `df['buy']`/`df['sell']` to all-False and provide plots.
+- For signal markers, prefer explicit lists with `None` for empty bars:
+  - `buy_marks = [df['low'].iloc[i] * 0.995 if bool(df['buy'].iloc[i]) else None for i in range(len(df))]`
+  - Avoid `series.where(mask, None).tolist()` for marker data because float series may still contain `NaN` instead of real `None`.
+- Before returning code, self-check:
+  1. every declared `# @param` used in code is read via `params.get(...)`
+  2. `df['buy']` and `df['sell']` are assigned boolean Series
+  3. every `plot['data']` and `signal['data']` length equals `len(df)`
+  4. `output` exists and is a dict
 
 # Output format for this chat turn
 
@@ -627,9 +827,10 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
             f"my_indicator_description = \"{prompt.replace('\\n', ' ')[:200]}\"\n\n"
         )
         body = (
+            "# @param rsi_len int 14 RSI period\n\n"
+            "rsi_len = params.get('rsi_len', 14)\n"
             "df = df.copy()\n\n"
             "# Example: robust RSI with edge-triggered buy/sell (no position management, no TP/SL on chart)\n"
-            "rsi_len = 14\n"
             "delta = df['close'].diff()\n"
             "gain = delta.clip(lower=0)\n"
             "loss = (-delta).clip(lower=0)\n"
@@ -643,12 +844,12 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
             "raw_buy = (rsi < 30)\n"
             "raw_sell = (rsi > 70)\n"
             "# One-shot signals\n"
-            "buy = raw_buy.fillna(False) & (~raw_buy.shift(1).fillna(False))\n"
-            "sell = raw_sell.fillna(False) & (~raw_sell.shift(1).fillna(False))\n"
-            "df['buy'] = buy.astype(bool)\n"
-            "df['sell'] = sell.astype(bool)\n\n"
-            "buy_marks = [df['low'].iloc[i] * 0.995 if bool(buy.iloc[i]) else None for i in range(len(df))]\n"
-            "sell_marks = [df['high'].iloc[i] * 1.005 if bool(sell.iloc[i]) else None for i in range(len(df))]\n\n"
+            "buy = (raw_buy.fillna(False) & (~raw_buy.shift(1).fillna(False))).astype(bool)\n"
+            "sell = (raw_sell.fillna(False) & (~raw_sell.shift(1).fillna(False))).astype(bool)\n"
+            "df['buy'] = buy\n"
+            "df['sell'] = sell\n\n"
+            "buy_marks = [df['low'].iloc[i] * 0.995 if bool(df['buy'].iloc[i]) else None for i in range(len(df))]\n"
+            "sell_marks = [df['high'].iloc[i] * 1.005 if bool(df['sell'].iloc[i]) else None for i in range(len(df))]\n\n"
             "output = {\n"
             "  'name': my_indicator_name,\n"
             "  'plots': [\n"
@@ -691,7 +892,7 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
                 + existing.strip()
                 + "\n```\n\n# Change request:\n\n"
                 + prompt
-                + "\n\nReturn one full replacement script: same QuantDinger rules (my_indicator_name/description, df = df.copy(), df['buy']/df['sell'], output dict, list lengths == len(df)). "
+                + "\n\nReturn one full replacement script: same QuantDinger rules (my_indicator_name/description, df = df.copy(), declared @param values must be read via params.get(...), df['buy']/df['sell'], output dict, list lengths == len(df)). "
                 "Python only — no markdown, no prose outside the code."
             )
 
@@ -720,6 +921,188 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
         
         return content.strip() or _template_code()
 
+    AUTO_FIX_HINT_CODES = {
+        "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET",
+        "SIGNAL_MARKERS_USE_WHERE_NONE",
+        "MISSING_OUTPUT",
+        "MISSING_BUY_SELL_COLUMNS",
+        "MISSING_DF_COPY",
+        "MISSING_INDICATOR_NAME",
+        "MISSING_INDICATOR_DESCRIPTION",
+        "UNKNOWN_STRATEGY_KEY",
+    }
+
+    def _needs_auto_fix(validation: Dict[str, Any]) -> bool:
+        if not validation.get("success"):
+            return True
+        for hint in validation.get("hints", []):
+            if hint.get("code") in AUTO_FIX_HINT_CODES:
+                return True
+        return False
+
+    def _format_validation_issues(validation: Dict[str, Any]) -> str:
+        issues: List[str] = []
+        if not validation.get("success"):
+            issues.append(f"- Verification failed: {validation.get('msg')}")
+            if validation.get("details"):
+                issues.append(f"- Details: {validation.get('details')}")
+        for hint in validation.get("hints", []):
+            code_name = hint.get("code") or "UNKNOWN"
+            params = hint.get("params") or {}
+            if params:
+                issues.append(f"- Hint {code_name}: {json.dumps(params, ensure_ascii=False)}")
+            else:
+                issues.append(f"- Hint {code_name}")
+        return "\n".join(issues) if issues else "- No issues provided"
+
+    def _repair_code_via_llm(bad_code: str, validation: Dict[str, Any]) -> str:
+        from app.services.llm import LLMService
+
+        llm = LLMService()
+        current_model = llm.get_code_generation_model()
+        current_api_key = llm.get_api_key()
+        if not current_api_key:
+            return bad_code
+
+        issues_text = _format_validation_issues(validation)
+        repair_prompt = (
+            "You produced QuantDinger indicator code that failed automatic validation. "
+            "Fix the code while preserving the user's trading idea and parameters. "
+            "Return one full replacement script only.\n\n"
+            f"# Original user request\n{prompt}\n\n"
+            f"# Validation issues to fix\n{issues_text}\n\n"
+            "# Current code\n```python\n"
+            + bad_code.strip()
+            + "\n```\n\n"
+            "# Repair requirements\n"
+            "- Keep QuantDinger indicator contract intact.\n"
+            "- If code declares # @param, read each declared param via params.get(...).\n"
+            "- Ensure df['buy'] and df['sell'] are boolean Series.\n"
+            "- Ensure output exists and all plot/signal data lengths equal len(df).\n"
+            "- For signal markers, prefer explicit None-or-price lists, not .where(..., None).tolist().\n"
+            "- Return Python only, no markdown, no explanation."
+        )
+
+        content = llm.call_llm_api(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": repair_prompt},
+            ],
+            model=current_model,
+            temperature=0.2,
+            use_json_mode=False,
+        )
+
+        content = (content or "").strip()
+        if content.startswith("```python"):
+            content = content[9:]
+        elif content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        return content.strip() or bad_code
+
+    def _generate_final_code() -> tuple[str, Dict[str, Any]]:
+        try:
+            code_text = _generate_code_via_llm()
+        except Exception as e:
+            logger.error(f"ai_generate LLM failed, fallback to template. Error: {type(e).__name__}: {e}")
+            code_text = _template_code()
+
+        validation = _validate_indicator_code_internal(code_text)
+        if not _needs_auto_fix(validation):
+            debug = {
+                "auto_fix_applied": False,
+                "auto_fix_succeeded": False,
+                "returned_candidate": "initial",
+                "initial_validation": _indicator_debug_summary(validation),
+                "final_validation": _indicator_debug_summary(validation),
+            }
+            debug["human_summary"] = _indicator_human_summary(
+                validation, validation, False, False, "initial"
+            )
+            logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+            return code_text, debug
+
+        logger.warning("ai_generate produced code needing auto-fix: %s", _format_validation_issues(validation))
+        try:
+            repaired = _repair_code_via_llm(code_text, validation)
+        except Exception as e:
+            logger.error(f"ai_generate auto-fix failed, returning first pass. Error: {type(e).__name__}: {e}")
+            debug = {
+                "auto_fix_applied": True,
+                "auto_fix_succeeded": False,
+                "returned_candidate": "initial",
+                "initial_validation": _indicator_debug_summary(validation),
+                "final_validation": _indicator_debug_summary(validation),
+                "auto_fix_error": str(e),
+            }
+            debug["human_summary"] = _indicator_human_summary(
+                validation, validation, True, False, "initial"
+            )
+            logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+            return code_text, debug
+
+        repaired_validation = _validate_indicator_code_internal(repaired)
+        if repaired_validation.get("success") and not _needs_auto_fix(repaired_validation):
+            logger.info("ai_generate auto-fix succeeded")
+            debug = {
+                "auto_fix_applied": True,
+                "auto_fix_succeeded": True,
+                "returned_candidate": "repaired",
+                "initial_validation": _indicator_debug_summary(validation),
+                "final_validation": _indicator_debug_summary(repaired_validation),
+            }
+            debug["human_summary"] = _indicator_human_summary(
+                validation, repaired_validation, True, True, "repaired"
+            )
+            logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+            return repaired, debug
+
+        repaired_hint_codes = {h.get("code") for h in repaired_validation.get("hints", [])}
+        if repaired_validation.get("success"):
+            logger.warning("ai_generate auto-fix improved code but some non-blocking issues remain")
+            debug = {
+                "auto_fix_applied": True,
+                "auto_fix_succeeded": True,
+                "returned_candidate": "repaired",
+                "initial_validation": _indicator_debug_summary(validation),
+                "final_validation": _indicator_debug_summary(repaired_validation),
+            }
+            debug["human_summary"] = _indicator_human_summary(
+                validation, repaired_validation, True, True, "repaired"
+            )
+            logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+            return repaired, debug
+
+        if repaired_hint_codes.intersection(AUTO_FIX_HINT_CODES):
+            logger.warning("ai_generate auto-fix still has blocking issues, returning first pass")
+            debug = {
+                "auto_fix_applied": True,
+                "auto_fix_succeeded": False,
+                "returned_candidate": "initial",
+                "initial_validation": _indicator_debug_summary(validation),
+                "final_validation": _indicator_debug_summary(repaired_validation),
+            }
+            debug["human_summary"] = _indicator_human_summary(
+                validation, repaired_validation, True, False, "initial"
+            )
+            logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+            return code_text, debug
+
+        debug = {
+            "auto_fix_applied": True,
+            "auto_fix_succeeded": False,
+            "returned_candidate": "repaired",
+            "initial_validation": _indicator_debug_summary(validation),
+            "final_validation": _indicator_debug_summary(repaired_validation),
+        }
+        debug["human_summary"] = _indicator_human_summary(
+            validation, repaired_validation, True, False, "repaired"
+        )
+        logger.info("ai_generate debug=%s", json.dumps(debug, ensure_ascii=False))
+        return repaired, debug
+
     # Capture user_id before generator runs (generator executes outside request context)
     user_id = g.user_id
     def stream():
@@ -735,11 +1118,9 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
             yield "data: [DONE]\n\n"
             return
 
-        try:
-            code_text = _generate_code_via_llm()
-        except Exception as e:
-            logger.error(f"ai_generate LLM failed, fallback to template. Error: {type(e).__name__}: {e}")
-            code_text = _template_code()
+        code_text, debug_info = _generate_final_code()
+
+        yield "data: " + json.dumps({"debug": debug_info}, ensure_ascii=False) + "\n\n"
 
         # Stream in chunks (front-end appends).
         chunk_size = 200

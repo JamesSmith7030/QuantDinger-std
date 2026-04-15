@@ -84,6 +84,14 @@ def _as_list(value: Any) -> List[str]:
     return []
 
 
+def _is_bot_strategy(row: Dict[str, Any]) -> bool:
+    try:
+        mode = str((row or {}).get("strategy_mode") or "").strip().lower()
+        return mode == "bot"
+    except Exception:
+        return False
+
+
 def _calc_unrealized_pnl(side: str, entry_price: float, current_price: float, size: float) -> float:
     try:
         ep = float(entry_price or 0.0)
@@ -310,7 +318,7 @@ def summary():
             cur = db.cursor()
             cur.execute(
                 """
-                SELECT id, strategy_name, strategy_type, status, initial_capital, trading_config
+                SELECT id, strategy_name, strategy_type, status, initial_capital, trading_config, strategy_mode
                 FROM qd_strategies_trading
                 WHERE user_id = ?
                 """,
@@ -319,6 +327,7 @@ def summary():
             strategies = cur.fetchall() or []
             cur.close()
 
+        strategies = [s for s in strategies if not _is_bot_strategy(s)]
         running = [s for s in strategies if (s.get("status") or "").strip().lower() == "running"]
         indicator_strategy_count = len([s for s in running if (s.get("strategy_type") or "") == "IndicatorStrategy"])
 
@@ -346,11 +355,13 @@ def summary():
                 """
                 SELECT p.*, s.strategy_name, s.initial_capital, s.leverage, s.market_type
                 FROM qd_strategy_positions p
-                LEFT JOIN qd_strategies_trading s ON s.id = p.strategy_id
+                INNER JOIN qd_strategies_trading s ON s.id = p.strategy_id
                 WHERE p.user_id = ?
+                  AND s.user_id = ?
+                  AND COALESCE(LOWER(TRIM(s.strategy_mode)), 'signal') <> 'bot'
                 ORDER BY p.updated_at DESC
                 """,
-                (user_id,)
+                (user_id, user_id)
             )
             rows = cur.fetchall() or []
             cur.close()
@@ -385,7 +396,17 @@ def summary():
         # Also compute all-time trade count for dashboard top cards.
         with get_db_connection() as db:
             cur = db.cursor()
-            cur.execute("SELECT COUNT(1) AS cnt FROM qd_strategy_trades WHERE user_id = ?", (user_id,))
+            cur.execute(
+                """
+                SELECT COUNT(1) AS cnt
+                FROM qd_strategy_trades t
+                INNER JOIN qd_strategies_trading s ON s.id = t.strategy_id
+                WHERE t.user_id = ?
+                  AND s.user_id = ?
+                  AND COALESCE(LOWER(TRIM(s.strategy_mode)), 'signal') <> 'bot'
+                """,
+                (user_id, user_id)
+            )
             total_trades_all = int((cur.fetchone() or {}).get("cnt") or 0)
             cur.close()
 
@@ -395,12 +416,14 @@ def summary():
                 """
                 SELECT t.*, s.strategy_name
                 FROM qd_strategy_trades t
-                LEFT JOIN qd_strategies_trading s ON s.id = t.strategy_id
+                INNER JOIN qd_strategies_trading s ON s.id = t.strategy_id
                 WHERE t.user_id = ?
+                  AND s.user_id = ?
+                  AND COALESCE(LOWER(TRIM(s.strategy_mode)), 'signal') <> 'bot'
                 ORDER BY t.created_at DESC
                 LIMIT 500
                 """,
-                (user_id,)
+                (user_id, user_id)
             )
             recent_trades_raw = cur.fetchall() or []
             cur.close()

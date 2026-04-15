@@ -16,6 +16,23 @@ logger = get_logger(__name__)
 
 _PROFILE_TIMEZONE_RE = re.compile(r'^[A-Za-z0-9_/+\-.]+$')
 
+
+def _ensure_chart_templates_column():
+    """Add qd_users.chart_templates when upgrading existing databases."""
+    try:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                ALTER TABLE qd_users
+                ADD COLUMN IF NOT EXISTS chart_templates TEXT DEFAULT ''
+                """
+            )
+            db.commit()
+            cur.close()
+    except Exception as e:
+        logger.warning(f"ensure chart_templates column skipped: {e}")
+
 user_bp = Blueprint('user_manage', __name__)
 
 
@@ -689,6 +706,191 @@ def update_notification_settings():
         })
     except Exception as e:
         logger.error(f"update_notification_settings failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_bp.route('/chart-templates', methods=['GET'])
+@login_required
+def get_chart_templates():
+    """Get current user's indicator chart templates."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+
+        _ensure_chart_templates_column()
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            cur.close()
+
+        raw = (row.get('chart_templates') if row else '') or ''
+        templates = []
+        if raw:
+            try:
+                templates = json.loads(raw)
+            except Exception:
+                templates = []
+        if not isinstance(templates, list):
+            templates = []
+
+        templates = sorted(
+            [tpl for tpl in templates if isinstance(tpl, dict)],
+            key=lambda x: str(x.get('updated_at') or ''),
+            reverse=True
+        )
+        return jsonify({'code': 1, 'msg': 'success', 'data': templates})
+    except Exception as e:
+        logger.error(f"get_chart_templates failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_bp.route('/chart-templates', methods=['POST'])
+@login_required
+def save_chart_template():
+    """Create or update a user's indicator chart template."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        template_id = str(data.get('template_id') or '').strip()
+        indicators = data.get('indicators') or []
+
+        if not name:
+            return jsonify({'code': 0, 'msg': 'Template name is required', 'data': None}), 400
+        if len(name) > 80:
+            return jsonify({'code': 0, 'msg': 'Template name is too long', 'data': None}), 400
+        if not isinstance(indicators, list):
+            return jsonify({'code': 0, 'msg': 'Indicators must be a list', 'data': None}), 400
+
+        sanitized = []
+        for item in indicators:
+            if not isinstance(item, dict):
+                continue
+            indicator_id = str(item.get('id') or '').strip()
+            instance_id = str(item.get('instanceId') or '').strip()
+            indicator_type = str(item.get('type') or '').strip()
+            if not indicator_id or not instance_id or not indicator_type:
+                continue
+            params = item.get('params') if isinstance(item.get('params'), dict) else {}
+            style = item.get('style') if isinstance(item.get('style'), dict) else {}
+            sanitized.append({
+                'id': indicator_id,
+                'instanceId': instance_id,
+                'name': str(item.get('name') or '').strip(),
+                'shortName': str(item.get('shortName') or '').strip(),
+                'type': indicator_type,
+                'visible': bool(item.get('visible', True)),
+                'params': params,
+                'style': {
+                    'color': str(style.get('color') or '').strip(),
+                    'lineWidth': int(style.get('lineWidth') or 2)
+                }
+            })
+
+        now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        _ensure_chart_templates_column()
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            raw = (row.get('chart_templates') if row else '') or ''
+            templates = []
+            if raw:
+                try:
+                    templates = json.loads(raw)
+                except Exception:
+                    templates = []
+            if not isinstance(templates, list):
+                templates = []
+
+            saved = None
+            updated_templates = []
+            if template_id:
+                for tpl in templates:
+                    if isinstance(tpl, dict) and str(tpl.get('id') or '') == template_id:
+                        tpl = {
+                            **tpl,
+                            'id': template_id,
+                            'name': name,
+                            'indicators': sanitized,
+                            'updated_at': now_iso
+                        }
+                        saved = tpl
+                    updated_templates.append(tpl)
+            else:
+                updated_templates = [tpl for tpl in templates if isinstance(tpl, dict)]
+
+            if saved is None:
+                saved = {
+                    'id': f"tpl_{int(time.time() * 1000)}",
+                    'name': name,
+                    'indicators': sanitized,
+                    'created_at': now_iso,
+                    'updated_at': now_iso
+                }
+                updated_templates.append(saved)
+
+            updated_templates = sorted(updated_templates, key=lambda x: str(x.get('updated_at') or ''), reverse=True)[:20]
+            cur.execute(
+                "UPDATE qd_users SET chart_templates = ?, updated_at = NOW() WHERE id = ?",
+                (json.dumps(updated_templates, ensure_ascii=False), user_id)
+            )
+            db.commit()
+            cur.close()
+
+        return jsonify({'code': 1, 'msg': 'Chart template saved', 'data': saved})
+    except Exception as e:
+        logger.error(f"save_chart_template failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_bp.route('/chart-templates', methods=['DELETE'])
+@login_required
+def delete_chart_template():
+    """Delete a user's chart template by id."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+
+        template_id = str(request.args.get('template_id') or '').strip()
+        if not template_id:
+            return jsonify({'code': 0, 'msg': 'template_id is required', 'data': None}), 400
+
+        _ensure_chart_templates_column()
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            raw = (row.get('chart_templates') if row else '') or ''
+            templates = []
+            if raw:
+                try:
+                    templates = json.loads(raw)
+                except Exception:
+                    templates = []
+            if not isinstance(templates, list):
+                templates = []
+
+            updated_templates = [
+                tpl for tpl in templates
+                if not (isinstance(tpl, dict) and str(tpl.get('id') or '') == template_id)
+            ]
+            cur.execute(
+                "UPDATE qd_users SET chart_templates = ?, updated_at = NOW() WHERE id = ?",
+                (json.dumps(updated_templates, ensure_ascii=False), user_id)
+            )
+            db.commit()
+            cur.close()
+
+        return jsonify({'code': 1, 'msg': 'Chart template deleted', 'data': {'template_id': template_id}})
+    except Exception as e:
+        logger.error(f"delete_chart_template failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 

@@ -97,6 +97,19 @@ class ScriptPosition(dict):
         self['amount'] = next_size
         self['entry_price'] = next_price
 
+    def reduce_position(self, amount: float) -> None:
+        """Reduce position size by *amount*. Clears to flat when size reaches zero."""
+        reduce = float(amount or 0.0)
+        if reduce <= 0:
+            return
+        current_size = float(self.get('size') or 0.0)
+        remaining = current_size - reduce
+        if remaining <= 1e-12:
+            self.clear_position()
+        else:
+            self['size'] = remaining
+            self['amount'] = remaining
+
 
 class StrategyScriptContext:
     """与回测 ScriptBacktestContext 行为一致，供实盘按根推进。"""

@@ -383,6 +383,68 @@ class FastAnalysisService:
             summaries.append(f"- {question[:80]}: Market probability {prob:.1f}%")
         
         return "\n".join(summaries) if summaries else "No related prediction market events found."
+
+    def _format_crypto_factor_prompt(self, crypto_factors: Dict[str, Any], language: str) -> str:
+        """Format crypto-specific market structure data for prompts."""
+        if not crypto_factors:
+            return "Crypto flow / derivatives data unavailable."
+
+        is_zh = str(language or "").lower().startswith("zh")
+        signals = crypto_factors.get("signals") or {}
+
+        def _fmt_num(v: Any, suffix: str = "") -> str:
+            if v is None or v == "":
+                return "N/A"
+            try:
+                n = float(v)
+            except Exception:
+                return str(v)
+            if abs(n) >= 1_000_000_000:
+                return f"{n / 1_000_000_000:.2f}B{suffix}"
+            if abs(n) >= 1_000_000:
+                return f"{n / 1_000_000:.2f}M{suffix}"
+            if abs(n) >= 1_000:
+                return f"{n / 1_000:.2f}K{suffix}"
+            return f"{n:.4f}{suffix}" if abs(n) < 1 else f"{n:.2f}{suffix}"
+
+        def _fmt_pct(v: Any) -> str:
+            if v is None or v == "":
+                return "N/A"
+            try:
+                return f"{float(v):.2f}%"
+            except Exception:
+                return str(v)
+
+        if is_zh:
+            return (
+                f"- 24h成交额: {_fmt_num(crypto_factors.get('volume_24h'), ' USD')}\n"
+                f"- 成交活跃度变化: {_fmt_pct(crypto_factors.get('volume_change_24h'))}\n"
+                f"- 资金费率: {_fmt_pct(crypto_factors.get('funding_rate'))}\n"
+                f"- 未平仓量(OI): {_fmt_num(crypto_factors.get('open_interest'), ' USD')}\n"
+                f"- OI变化(24h): {_fmt_pct(crypto_factors.get('open_interest_change_24h'))}\n"
+                f"- 多空比: {_fmt_num(crypto_factors.get('long_short_ratio'))}\n"
+                f"- 交易所净流: {_fmt_num(crypto_factors.get('exchange_netflow'), ' USD')}\n"
+                f"- 稳定币净流: {_fmt_num(crypto_factors.get('stablecoin_netflow'), ' USD')}\n"
+                f"- 衍生品偏向: {signals.get('derivatives_bias', 'neutral')}\n"
+                f"- 资金流偏向: {signals.get('flow_bias', 'neutral')}\n"
+                f"- 挤仓风险: {signals.get('squeeze_risk', 'low')}\n"
+                f"- 因子摘要: {crypto_factors.get('summary') or '暂无'}"
+            )
+
+        return (
+            f"- 24h volume: {_fmt_num(crypto_factors.get('volume_24h'), ' USD')}\n"
+            f"- Volume activity change: {_fmt_pct(crypto_factors.get('volume_change_24h'))}\n"
+            f"- Funding rate: {_fmt_pct(crypto_factors.get('funding_rate'))}\n"
+            f"- Open interest: {_fmt_num(crypto_factors.get('open_interest'), ' USD')}\n"
+            f"- OI change (24h): {_fmt_pct(crypto_factors.get('open_interest_change_24h'))}\n"
+            f"- Long/short ratio: {_fmt_num(crypto_factors.get('long_short_ratio'))}\n"
+            f"- Exchange netflow: {_fmt_num(crypto_factors.get('exchange_netflow'), ' USD')}\n"
+            f"- Stablecoin netflow: {_fmt_num(crypto_factors.get('stablecoin_netflow'), ' USD')}\n"
+            f"- Derivatives bias: {signals.get('derivatives_bias', 'neutral')}\n"
+            f"- Flow bias: {signals.get('flow_bias', 'neutral')}\n"
+            f"- Squeeze risk: {signals.get('squeeze_risk', 'low')}\n"
+            f"- Factor summary: {crypto_factors.get('summary') or 'N/A'}"
+        )
     
     # ==================== Memory Layer ====================
     
@@ -434,6 +496,8 @@ class FastAnalysisService:
         indicators = data.get("indicators") or {}
         fundamental = data.get("fundamental") or {}
         company = data.get("company") or {}
+        crypto_factors = data.get("crypto_factors") or {}
+        is_crypto = str(data.get("market") or "").strip().lower() == "crypto"
         news_summary = self._format_news_summary(data.get("news") or [])
         polymarket_events = data.get("polymarket") or []
         
@@ -477,6 +541,23 @@ class FastAnalysisService:
         
         # Build decision guidance based on technical indicators
         decision_guidance = self._build_decision_guidance(rsi_value, macd_signal, ma_trend, change_24h)
+        crypto_factor_block = self._format_crypto_factor_prompt(crypto_factors, language)
+        crypto_system_rules = ""
+        crypto_user_block = ""
+        if is_crypto:
+            crypto_system_rules = """
+8. **Crypto Market Structure Override**:
+   - For Crypto, DO NOT rely on stock-style valuation logic as your core thesis.
+   - Prioritize derivatives positioning, funding rate, open interest, long/short ratio, exchange netflow, and stablecoin netflow.
+   - Positive funding + rising OI can confirm bullish momentum, but extreme values may also indicate crowded longs and squeeze risk.
+   - Exchange net outflow is generally constructive; large net inflow may imply sell pressure or risk-off hedging.
+   - Stablecoin net inflow can imply fresh buying power entering the market.
+   - If derivatives are crowded or squeeze risk is high, explicitly mention this in summary, reasons, and risks.
+"""
+            crypto_user_block = f"""
+🪙 CRYPTO MARKET STRUCTURE:
+{crypto_factor_block}
+"""
         
         system_prompt = f"""You are QuantDinger's Senior Financial Analyst with 20+ years of experience. 
 You are CONSERVATIVE and OBJECTIVE. Your analysis must be based on DATA, not speculation.
@@ -514,6 +595,7 @@ You are CONSERVATIVE and OBJECTIVE. Your analysis must be based on DATA, not spe
    - High VIX (>30) indicates fear → Consider SELL or HOLD, avoid BUY
    - Rising interest rates usually negative for growth assets → Consider SELL
    - Geopolitical tensions can cause sudden volatility → Consider SELL if risk-off sentiment
+{crypto_system_rules}
 
 {decision_guidance}
 
@@ -553,7 +635,7 @@ You are CONSERVATIVE and OBJECTIVE. Your analysis must be based on DATA, not spe
    - If prediction markets show high probability for bullish events (e.g., "BTC reaches $100k"), consider this as a positive signal
    - If prediction markets show high probability for bearish events, consider this as a risk factor
    - Use prediction market probabilities as a sentiment indicator alongside technical analysis
-5. **Fundamental Analysis**: Evaluate valuation, growth, competitive position if data available. If data is insufficient, say so.
+5. **Fundamental Analysis**: For Crypto, focus on market structure / flow / derivatives factors instead of stock-style valuation. For equities, evaluate valuation, growth, competitive position if data available.
 6. **Risk Assessment**: 
    - Explain why the stop loss level is appropriate
    - List ALL significant risks (technical, macro, news, fundamental)
@@ -634,6 +716,7 @@ When the score is neutral (-20 to +20), you can use your judgment, but still con
 - Volatility: {vol_data.get('level', 'N/A')} ({vol_data.get('pct', 0)}%)
 - Trend: {indicators.get('trend', 'N/A')}
 - Price Position (20d): {indicators.get('price_position', 'N/A')}%
+{crypto_user_block}
 
 🌐 MACRO ENVIRONMENT:
 {macro_summary}
@@ -644,7 +727,7 @@ When the score is neutral (-20 to +20), you can use your judgment, but still con
 🎯 PREDICTION MARKETS ({len(polymarket_events)} related events):
 {self._format_polymarket_summary(polymarket_events)}
 
-💼 FUNDAMENTALS:
+💼 FUNDAMENTALS / MARKET STRUCTURE:
 - Company: {company.get('name', data['symbol'])}
 - Industry: {company.get('industry', 'N/A')}
 - P/E Ratio: {fundamental.get('pe_ratio', 'N/A')}
@@ -671,7 +754,7 @@ IMPORTANT:
 1. **CRITICAL**: Check for GEOPOLITICAL EVENTS (wars, conflicts, military actions) in the news section. These events have HIGHEST PRIORITY and can override all technical indicators.
 2. Consider the macro environment (especially DXY, VIX, rates, geopolitical events) when making your recommendation.
 3. Pay attention to BREAKING NEWS and international events that could cause sudden market moves. Geopolitical tensions (e.g., US-Iran conflict) can cause severe market volatility.
-4. For US stocks, analyze financial statements and earnings trends to assess company health.
+4. For Crypto, explicitly explain whether derivatives + capital flow data confirm or contradict price action. For US stocks, analyze financial statements and earnings trends to assess company health.
 5. If you see news about wars, conflicts, or major geopolitical events, you MUST mention them in your analysis and adjust your recommendation accordingly.
 6. Provide your analysis now. Remember: all prices must be within 10% of ${current_price}."""
 
@@ -1164,9 +1247,13 @@ IMPORTANT:
                 f"(Technical: {objective_score['technical_score']:.1f}, Fundamental: {objective_score['fundamental_score']:.1f}, "
                 f"Sentiment: {objective_score['sentiment_score']:.1f}, Macro: {objective_score['macro_score']:.1f})"
             )
+            crypto_factor_score = objective_score.get("crypto_factor_score")
+            crypto_factor_summary = objective_score.get("crypto_factor_summary") or (data.get("crypto_factors") or {}).get("summary", "")
 
             score_based_decision = self._score_to_decision(objective_score["overall_score"], market=market)
             llm_decision = str(analysis.get("decision", "HOLD") or "HOLD").upper()
+            if market == "Crypto" and crypto_factor_score is not None:
+                analysis["fundamental_score"] = max(0, min(100, int(round((float(crypto_factor_score) + 100.0) / 2.0))))
 
             # Horizon trend outlook for users (short/medium/long decision reference)
             score_1d = float((objective_by_tf.get("1D") or {}).get("overall_score", objective_score.get("overall_score", 0.0)) or 0.0)
@@ -1328,6 +1415,8 @@ IMPORTANT:
             if isinstance(detailed_analysis, str):
                 # If AI returned a string instead of dict, use it as technical analysis
                 detailed_analysis = {"technical": detailed_analysis, "fundamental": "", "sentiment": ""}
+            if market == "Crypto" and not detailed_analysis.get("fundamental"):
+                detailed_analysis["fundamental"] = crypto_factor_summary or (data.get("crypto_factors") or {}).get("summary", "")
             
             result.update({
                 "decision": analysis.get("decision", "HOLD"),
@@ -1365,6 +1454,10 @@ IMPORTANT:
                     "overall": self._calculate_overall_score(analysis),
                 },
                 "objective_score": analysis.get("objective_score", {}),
+                "crypto_factors": data.get("crypto_factors", {}),
+                "crypto_factor_score": crypto_factor_score,
+                "crypto_factor_breakdown": objective_score.get("crypto_factor_breakdown", []),
+                "crypto_factor_summary": crypto_factor_summary,
                 "score_based_decision": analysis.get("score_based_decision", "HOLD"),
                 "market_data": {
                     "current_price": current_price,
@@ -1812,12 +1905,17 @@ IMPORTANT:
         news = data.get("news") or []
         macro = data.get("macro") or {}
         price_data = data.get("price") or {}
+        crypto_factors = data.get("crypto_factors") or {}
         
         # 1. 技术指标评分 (-100 to +100)
         technical_score = self._calculate_technical_score(indicators, price_data)
         
         # 2. 基本面评分 (-100 to +100)
         fundamental_score = self._calculate_fundamental_score(fundamental, data.get("market", ""))
+        crypto_factor_objective = self._calculate_crypto_factor_score(crypto_factors, price_data)
+        crypto_factor_score = float(crypto_factor_objective.get("score", 0.0) or 0.0)
+        if str(data.get("market") or "").strip() == "Crypto" and crypto_factors:
+            fundamental_score = crypto_factor_score
         
         # 3. 新闻情绪评分 (-100 to +100)
         sentiment_score = self._calculate_sentiment_score(news)
@@ -1859,6 +1957,8 @@ IMPORTANT:
         fundamental_present = (
             market_type in ("USStock", "CNStock", "HKStock") and _fundamental_meaningful(fundamental)
         )
+        if market_type == "Crypto" and crypto_factors:
+            fundamental_present = True
         sentiment_present = bool(news)
         macro_present = bool(macro)
         # indicators 一旦成功计算通常就存在，但这里也做一次保护
@@ -1893,7 +1993,10 @@ IMPORTANT:
             "fundamental_score": fundamental_score,
             "sentiment_score": sentiment_score,
             "macro_score": macro_score,
-            "overall_score": overall_score
+            "overall_score": overall_score,
+            "crypto_factor_score": crypto_factor_score,
+            "crypto_factor_breakdown": crypto_factor_objective.get("breakdown", []),
+            "crypto_factor_summary": crypto_factor_objective.get("summary") or (crypto_factors.get("summary") if crypto_factors else ""),
         }
 
     def _get_ai_calibration(self, market: str = "Crypto") -> Dict[str, Any]:
@@ -2174,6 +2277,94 @@ IMPORTANT:
             return 50.0
 
         return max(-100, min(100, score))
+
+    def _calculate_crypto_factor_score(self, crypto_factors: Dict[str, Any], price_data: Dict[str, Any]) -> Dict[str, Any]:
+        """基于加密货币交易大数据因子计算可解释评分。"""
+        if not crypto_factors:
+            return {"score": 0.0, "breakdown": [], "summary": ""}
+
+        breakdown = []
+        score = 0.0
+
+        def add(name: str, value: float, reason: str):
+            nonlocal score
+            score += float(value)
+            breakdown.append({"factor": name, "score": round(float(value), 2), "reason": reason})
+
+        funding_rate = crypto_factors.get("funding_rate")
+        oi_change = crypto_factors.get("open_interest_change_24h")
+        long_short_ratio = crypto_factors.get("long_short_ratio")
+        exchange_netflow = crypto_factors.get("exchange_netflow")
+        stablecoin_netflow = crypto_factors.get("stablecoin_netflow")
+        volume_change = crypto_factors.get("volume_change_24h")
+        change_24h = (price_data or {}).get("changePercent")
+
+        try:
+            if funding_rate is not None and oi_change is not None:
+                fr = float(funding_rate)
+                oi = float(oi_change)
+                if fr > 0 and oi > 3:
+                    add("funding_oi", 18, "资金费率偏正且 OI 上升，衍生品多头动能增强")
+                elif fr < 0 and oi > 3:
+                    add("funding_oi", -18, "资金费率偏负且 OI 上升，空头动能增强")
+        except Exception:
+            pass
+
+        try:
+            if exchange_netflow is not None:
+                enf = float(exchange_netflow)
+                if enf < 0:
+                    add("exchange_netflow", 16, "交易所净流出，筹码倾向离场保管，通常偏利多")
+                elif enf > 0:
+                    add("exchange_netflow", -16, "交易所净流入，潜在卖压或风险对冲上升")
+        except Exception:
+            pass
+
+        try:
+            if stablecoin_netflow is not None:
+                stf = float(stablecoin_netflow)
+                if stf > 0:
+                    add("stablecoin_netflow", 12, "稳定币净流入增强，潜在买盘增加")
+                elif stf < 0:
+                    add("stablecoin_netflow", -12, "稳定币净流出，边际买盘转弱")
+        except Exception:
+            pass
+
+        try:
+            if long_short_ratio is not None:
+                lsr = float(long_short_ratio)
+                if lsr > 1.6:
+                    add("long_short_ratio", -10, "多空比过热，需警惕多头拥挤和长挤风险")
+                elif lsr < 0.75:
+                    add("long_short_ratio", 8, "空头占优过深，存在反向挤空可能")
+        except Exception:
+            pass
+
+        try:
+            if volume_change is not None and change_24h is not None:
+                vol = float(volume_change)
+                chg = float(change_24h)
+                if vol > 15 and chg > 0:
+                    add("volume_price", 10, "放量上涨，趋势确认度提升")
+                elif vol > 15 and chg < 0:
+                    add("volume_price", -10, "放量下跌，空头主导增强")
+                elif vol < -15 and abs(chg) > 3:
+                    add("volume_price", -6 if chg > 0 else 6, "价格波动与成交回落背离，趋势持续性存疑")
+        except Exception:
+            pass
+
+        squeeze_risk = ((crypto_factors.get("signals") or {}).get("squeeze_risk") or "").lower()
+        if squeeze_risk == "high":
+            add("squeeze_risk", -8, "衍生品拥挤度高，短线波动放大风险上升")
+        elif squeeze_risk == "medium":
+            add("squeeze_risk", -3, "衍生品拥挤度抬升，需要控制追涨杀跌")
+
+        summary = crypto_factors.get("summary") or ""
+        return {
+            "score": max(-100.0, min(100.0, score)),
+            "breakdown": breakdown,
+            "summary": summary,
+        }
     
     def _calculate_sentiment_score(self, news: List[Dict]) -> float:
         """

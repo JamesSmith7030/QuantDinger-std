@@ -352,6 +352,21 @@ class HtxClient(BaseRestClient):
                         raw = self._swap_private_request(method, path)
                 data = raw.get("data")
                 if data is not None:
+                    # For v1-isolated, each item is a per-contract isolated
+                    # margin account. If ALL items have zero balance the user
+                    # likely keeps funds in cross-margin — skip to next endpoint.
+                    if tag == "v1-isolated" and isinstance(data, list):
+                        has_bal = any(
+                            float(it.get("margin_balance") or 0) > 0
+                            or float(it.get("margin_available") or 0) > 0
+                            for it in data if isinstance(it, dict)
+                        )
+                        if not has_bal:
+                            logger.info(
+                                "HTX v1-isolated returned %d items but all balances are zero, trying next endpoint",
+                                len(data),
+                            )
+                            continue
                     logger.info("HTX balance succeeded via %s", tag)
                     return raw
             except (LiveTradingError, Exception) as e:
@@ -440,16 +455,24 @@ class HtxClient(BaseRestClient):
             ("v1-cross", "POST", "/linear-swap-api/v1/swap_cross_position_info", body),
         ]
         last_err: Optional[Exception] = None
+        first_empty_raw = None
         for tag, method, path, req_body in position_endpoints:
             try:
                 raw = self._swap_private_request(method, path, json_body=req_body)
                 data = raw.get("data")
                 if data is not None:
-                    logger.info("HTX positions succeeded via %s (items=%d)", tag, len(data) if isinstance(data, list) else -1)
-                    return raw
+                    items = len(data) if isinstance(data, list) else -1
+                    logger.info("HTX positions succeeded via %s (items=%d)", tag, items)
+                    if isinstance(data, list) and len(data) > 0:
+                        return raw
+                    # Empty result — remember it but try next endpoint
+                    if first_empty_raw is None:
+                        first_empty_raw = raw
             except (LiveTradingError, Exception) as e:
                 logger.warning("HTX %s position failed: %s", tag, e)
                 last_err = e
+        if first_empty_raw is not None:
+            return first_empty_raw
         logger.warning("HTX all position endpoints failed for symbol=%s, last error: %s", symbol, last_err)
         return {"data": []}
 

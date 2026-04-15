@@ -12,6 +12,18 @@ class MetaAPIKeys(type):
         from app.utils.config_loader import load_addon_config
         val = load_addon_config().get('finnhub', {}).get('api_key')
         return val if val else os.getenv('FINNHUB_API_KEY', '')
+
+    @property
+    def COINGLASS_API_KEY(cls):
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('coinglass', {}).get('api_key')
+        return val if val else os.getenv('COINGLASS_API_KEY', '')
+
+    @property
+    def CRYPTOQUANT_API_KEY(cls):
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('cryptoquant', {}).get('api_key')
+        return val if val else os.getenv('CRYPTOQUANT_API_KEY', '')
     
     @property
     def TIINGO_API_KEY(cls):

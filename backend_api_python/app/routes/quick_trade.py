@@ -668,6 +668,7 @@ def get_balance():
         balance_data = {"available": 0, "total": 0, "currency": "USDT"}
 
         try:
+            raw = None
             if hasattr(client, "get_balance"):
                 raw = client.get_balance()
                 balance_data = _parse_balance(raw, exchange_id, market_type)
@@ -689,6 +690,12 @@ def get_balance():
             elif (exchange_id or "").lower() == "bitget" and market_type == "spot" and hasattr(client, "get_assets"):
                 raw = client.get_assets()
                 balance_data = _parse_balance(raw, exchange_id, market_type)
+            logger.info(
+                "Balance for %s/%s: available=%.4f total=%.4f (raw keys=%s)",
+                exchange_id, market_type,
+                balance_data.get("available", 0), balance_data.get("total", 0),
+                list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__,
+            )
         except Exception as be:
             logger.warning(f"Balance fetch failed: {be}")
             balance_data["error"] = str(be)
@@ -853,17 +860,28 @@ def _parse_balance(raw: Any, exchange_id: str, market_type: str) -> Dict[str, An
                 if total > 0 or result["available"] > 0:
                     result["total"] = total or result["available"]
                     return result
-            # HTX swap (v1 isolated/cross returns list, v3 unified may return dict)
-            htx_swap_item = None
+            # HTX swap (v1 isolated returns list of per-contract accounts,
+            # v1 cross returns list with single item, v3 may return dict)
             if isinstance(data, list) and data and isinstance(data[0], dict):
-                htx_swap_item = data[0]
-            elif isinstance(data, dict) and ("margin_balance" in data or "margin_available" in data or "withdraw_available" in data):
-                htx_swap_item = data
-            if htx_swap_item is not None:
-                if "margin_available" in htx_swap_item or "margin_balance" in htx_swap_item or "withdraw_available" in htx_swap_item:
-                    result["available"] = float(htx_swap_item.get("margin_available") or htx_swap_item.get("withdraw_available") or 0)
-                    result["total"] = float(htx_swap_item.get("margin_balance") or htx_swap_item.get("margin_static") or 0)
+                first = data[0]
+                if any(k in first for k in ("margin_available", "margin_balance", "withdraw_available")):
+                    sum_avail = 0.0
+                    sum_total = 0.0
+                    for it in data:
+                        if not isinstance(it, dict):
+                            continue
+                        sum_avail += _num(it.get("margin_available") or it.get("withdraw_available"))
+                        sum_total += _num(it.get("margin_balance") or it.get("margin_static"))
+                    result["available"] = sum_avail
+                    result["total"] = sum_total if sum_total > 0 else sum_avail
+                    logger.info("HTX swap balance parsed: available=%.4f total=%.4f (from %d items)", sum_avail, sum_total, len(data))
                     return result
+            elif isinstance(data, dict) and ("margin_balance" in data or "margin_available" in data or "withdraw_available" in data):
+                result["available"] = _num(data.get("margin_available") or data.get("withdraw_available"))
+                result["total"] = _num(data.get("margin_balance") or data.get("margin_static"))
+                if result["total"] <= 0 < result["available"]:
+                    result["total"] = result["available"]
+                return result
         # Fallback: try to find any USDT-like values
         if isinstance(raw, dict):
             for k, v in raw.items():
