@@ -20,11 +20,18 @@ class CommunityService:
     
     def __init__(self):
         self.billing = get_billing_service()
-        # Best-effort: ensure vip_free column exists (for old databases)
+        # Best-effort: ensure compatibility columns exist (for old databases)
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
                 cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS vip_free BOOLEAN DEFAULT FALSE")
+                # source_indicator_id links a buyer's local copy back to the published
+                # original indicator so we can re-sync the latest code on demand.
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS source_indicator_id INTEGER")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_indicator_codes_source "
+                    "ON qd_indicator_codes USING btree (source_indicator_id)"
+                )
                 db.commit()
                 cur.close()
         except Exception:
@@ -186,13 +193,35 @@ class CommunityService:
                 
                 # 检查是否已购买
                 is_purchased = False
+                has_update = False
+                local_copy_id = None
                 if user_id:
                     cur.execute(
                         "SELECT id FROM qd_indicator_purchases WHERE indicator_id = ? AND buyer_id = ?",
                         (indicator_id, user_id)
                     )
                     is_purchased = cur.fetchone() is not None
-                
+                    if is_purchased:
+                        # Look up buyer's local copy so the frontend can tell
+                        # whether a code-sync is needed.
+                        local_copy = self._find_buyer_local_copy(
+                            cur, buyer_id=user_id, indicator_id=indicator_id,
+                            original_name=row['name']
+                        )
+                        if local_copy is not None:
+                            local_copy_id = local_copy['id']
+                            # "Has update" = original code differs from local copy code.
+                            # The detail SELECT above doesn't include the full code blob,
+                            # so fetch it here — only once, only when user has purchased it.
+                            cur.execute(
+                                "SELECT code FROM qd_indicator_codes WHERE id = ?",
+                                (indicator_id,)
+                            )
+                            original_row = cur.fetchone()
+                            original_code = original_row['code'] if original_row else None
+                            local_code = local_copy.get('code')
+                            has_update = (original_code or '') != (local_code or '')
+
                 # 增加浏览次数
                 cur.execute(
                     "UPDATE qd_indicator_codes SET view_count = COALESCE(view_count, 0) + 1 WHERE id = ?",
@@ -222,7 +251,9 @@ class CommunityService:
                         'avatar': row['author_avatar'] or '/avatar2.jpg'
                     },
                     'is_purchased': is_purchased,
-                    'is_own': row['user_id'] == user_id
+                    'is_own': row['user_id'] == user_id,
+                    'has_update': has_update,
+                    'local_copy_id': local_copy_id
                 }
                 
         except Exception as e:
@@ -336,8 +367,9 @@ class CommunityService:
                     INSERT INTO qd_indicator_codes
                     (user_id, is_buy, end_time, name, code, description,
                      publish_to_community, pricing_type, price, is_encrypted, preview_image, vip_free,
+                     source_indicator_id,
                      createtime, updatetime, created_at, updated_at)
-                    VALUES (?, 1, 0, ?, ?, ?, 0, 'free', 0, ?, ?, ?, ?, ?, NOW(), NOW())
+                    VALUES (?, 1, 0, ?, ?, ?, 0, 'free', 0, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 """, (
                     buyer_id,
                     indicator['name'],
@@ -346,6 +378,7 @@ class CommunityService:
                     indicator['is_encrypted'] or 0,
                     indicator['preview_image'],
                     vip_free_value,  # Use boolean value instead of integer 0
+                    indicator_id,  # source_indicator_id — link back to the original
                     now_ts, now_ts
                 ))
                 
@@ -366,6 +399,180 @@ class CommunityService:
             logger.error(f"purchase_indicator failed: {e}")
             return False, f'error: {str(e)}', {}
     
+    # ------------------------------------------------------------------
+    # Local copy lookup / sync helpers
+    # ------------------------------------------------------------------
+
+    def _find_buyer_local_copy(self, cur, buyer_id: int, indicator_id: int, original_name: str = '') -> Optional[Dict[str, Any]]:
+        """Find a buyer's local copy that originated from the given published indicator.
+
+        Strategy:
+          1. Prefer the explicit link via ``source_indicator_id`` (set on new purchases).
+          2. Fall back to matching by ``(user_id, is_buy=1, name)`` for legacy copies
+             created before the ``source_indicator_id`` column existed.
+
+        Returns the row (id/name/code) or None if no candidate can be found.
+        """
+        try:
+            cur.execute(
+                """
+                SELECT id, name, code, is_encrypted
+                FROM qd_indicator_codes
+                WHERE user_id = ? AND source_indicator_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (buyer_id, indicator_id)
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'code': row.get('code'),
+                    'is_encrypted': row.get('is_encrypted'),
+                    'matched_by': 'source_id'
+                }
+        except Exception as e:
+            # source_indicator_id column may be missing on very old DBs; ignore and fallback
+            logger.debug(f"source_indicator_id lookup failed (likely legacy DB): {e}")
+
+        if not original_name:
+            return None
+
+        try:
+            cur.execute(
+                """
+                SELECT id, name, code, is_encrypted
+                FROM qd_indicator_codes
+                WHERE user_id = ? AND is_buy = 1 AND name = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (buyer_id, original_name)
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'code': row.get('code'),
+                    'is_encrypted': row.get('is_encrypted'),
+                    'matched_by': 'name'
+                }
+        except Exception as e:
+            logger.debug(f"legacy name-based lookup failed: {e}")
+
+        return None
+
+    def sync_purchased_indicator(self, buyer_id: int, indicator_id: int) -> Tuple[bool, str, Dict[str, Any]]:
+        """Refresh a buyer's local copy with the publisher's latest code/description.
+
+        The user must have already purchased ``indicator_id`` for this to succeed.
+        The buyer's local copy (matched by ``source_indicator_id``, or by name for
+        legacy copies) will be overwritten with the publisher's current content,
+        and its ``source_indicator_id`` will be repaired if it was missing.
+
+        If the original indicator has been unpublished/removed or the buyer's
+        local copy no longer exists (e.g. user deleted it), a recoverable error
+        is returned so the UI can explain what to do next.
+        """
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+
+                # 1. Must have purchased this indicator
+                cur.execute(
+                    "SELECT id FROM qd_indicator_purchases WHERE indicator_id = ? AND buyer_id = ?",
+                    (indicator_id, buyer_id)
+                )
+                if not cur.fetchone():
+                    cur.close()
+                    return False, 'not_purchased', {}
+
+                # 2. Fetch the (still-published) original
+                cur.execute(
+                    """
+                    SELECT id, user_id, name, code, description, preview_image, is_encrypted,
+                           publish_to_community, updated_at
+                    FROM qd_indicator_codes
+                    WHERE id = ?
+                    """,
+                    (indicator_id,)
+                )
+                original = cur.fetchone()
+                if not original:
+                    cur.close()
+                    return False, 'indicator_not_found', {}
+                if not original.get('publish_to_community'):
+                    cur.close()
+                    return False, 'indicator_unpublished', {}
+
+                # 3. Locate buyer's local copy
+                local = self._find_buyer_local_copy(
+                    cur, buyer_id=buyer_id, indicator_id=indicator_id,
+                    original_name=original['name']
+                )
+                if not local:
+                    cur.close()
+                    return False, 'local_copy_not_found', {}
+
+                # 4. Short-circuit when already identical
+                if (local.get('code') or '') == (original.get('code') or ''):
+                    # Still repair source_indicator_id on legacy rows so future
+                    # syncs take the fast path and "has_update" detection is accurate.
+                    if local.get('matched_by') == 'name':
+                        cur.execute(
+                            "UPDATE qd_indicator_codes SET source_indicator_id = ? WHERE id = ?",
+                            (indicator_id, local['id'])
+                        )
+                        db.commit()
+                    cur.close()
+                    return True, 'already_latest', {
+                        'local_copy_id': local['id'],
+                        'updated': False
+                    }
+
+                # 5. Overwrite the local copy with the latest publisher content
+                now_ts = int(time.time())
+                cur.execute(
+                    """
+                    UPDATE qd_indicator_codes
+                    SET code = ?,
+                        description = ?,
+                        preview_image = ?,
+                        is_encrypted = ?,
+                        source_indicator_id = ?,
+                        updatetime = ?,
+                        updated_at = NOW()
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (
+                        original['code'],
+                        original['description'],
+                        original['preview_image'],
+                        original['is_encrypted'] or 0,
+                        indicator_id,
+                        now_ts,
+                        local['id'],
+                        buyer_id,
+                    )
+                )
+                db.commit()
+                cur.close()
+
+                logger.info(
+                    f"User {buyer_id} synced local indicator {local['id']} "
+                    f"from published indicator {indicator_id} (matched_by={local.get('matched_by')})"
+                )
+                return True, 'success', {
+                    'local_copy_id': local['id'],
+                    'updated': True,
+                    'indicator_name': original['name']
+                }
+
+        except Exception as e:
+            logger.error(f"sync_purchased_indicator failed: {e}")
+            return False, f'error: {str(e)}', {}
+
     def get_my_purchases(self, user_id: int, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         """获取用户购买的指标列表"""
         offset = (page - 1) * page_size

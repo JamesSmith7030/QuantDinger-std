@@ -70,6 +70,12 @@ backend_api_python/data/quantdinger.db
 backend_api_python/data/memory/
 
 # ========================
+# i18n tooling
+# ========================
+scripts/.i18n-cache/
+QuantDinger-Vue-src/src/locales/lang/*.bak
+
+# ========================
 # Docker
 # ========================
 docker-compose.override.yml

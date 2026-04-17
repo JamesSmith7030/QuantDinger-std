@@ -499,19 +499,39 @@ class TradingExecutor:
             pass
         return 0.06
 
-    def _hydrate_script_ctx_from_positions(self, ctx: StrategyScriptContext, strategy_id: int, symbol: str) -> None:
+    def _hydrate_script_ctx_from_positions(
+        self,
+        ctx: StrategyScriptContext,
+        strategy_id: int,
+        symbol: str,
+        initial_capital: Optional[float] = None,
+        current_price: Optional[float] = None,
+    ) -> None:
         ctx.position.clear_position()
         pl = self._get_current_positions(strategy_id, symbol)
-        if not pl:
-            return
-        p = pl[0]
-        side = (p.get('side') or 'long').strip().lower()
-        if side not in ('long', 'short'):
-            return
-        size = float(p.get('size') or 0)
-        ep = float(p.get('entry_price') or 0)
-        if size > 0:
-            ctx.position.open_position(side, ep, size)
+        if pl:
+            p = pl[0]
+            side = (p.get('side') or 'long').strip().lower()
+            if side in ('long', 'short'):
+                size = float(p.get('size') or 0)
+                ep = float(p.get('entry_price') or 0)
+                if size > 0:
+                    ctx.position.open_position(side, ep, size)
+        # 把 ctx.balance 刷新为最新权益(初始资金 + 已实现盈亏 + 未实现盈亏),
+        # 这样趋势等使用 ctx.balance * POS_PCT 计算仓位的脚本能反映真实资金
+        try:
+            if initial_capital is not None and float(initial_capital) > 0:
+                eq = self._calculate_current_equity(
+                    strategy_id,
+                    float(initial_capital),
+                    current_positions=pl,
+                    current_price=current_price,
+                    symbol=symbol,
+                )
+                ctx.balance = float(eq)
+                ctx.equity = float(eq)
+        except Exception:
+            pass
 
     def _init_script_strategy_context(
         self,
@@ -599,6 +619,31 @@ class TradingExecutor:
 
         out: List[Dict[str, Any]] = []
         trig = float(bar_close or 0)
+        # 把 bot 脚本传来的 USDT 名义金额换算成本 tick 的近似 qty,用于维护
+        # 本地 ctx.position 在同一 bar/tick 内多个 order 之间的一致性(只影响
+        # 脚本对 ctx.position 的符号/数量判断,真实下单数量仍由
+        # _execute_signal 按 leverage/market_type 计算)
+        try:
+            is_bot_script = bool(
+                (trading_config or {}).get('bot_type')
+                or (trading_config or {}).get('strategy_mode') == 'bot'
+            )
+        except Exception:
+            is_bot_script = False
+        try:
+            leverage = float((trading_config or {}).get('leverage') or 1) or 1.0
+        except Exception:
+            leverage = 1.0
+        market_type = str((trading_config or {}).get('market_type') or 'swap').lower()
+
+        def _to_local_qty(usdt_or_ratio: float, ref_price: float) -> float:
+            if ref_price is None or ref_price <= 0 or usdt_or_ratio is None or usdt_or_ratio <= 0:
+                return 0.0
+            if is_bot_script and float(usdt_or_ratio) > 1.0:
+                lev = leverage if market_type != 'spot' else 1.0
+                return float(usdt_or_ratio) * lev / float(ref_price)
+            return float(usdt_or_ratio)
+
         for order in list(ctx._orders or []):
             action = str(order.get('action') or '').lower()
             try:
@@ -614,59 +659,61 @@ class TradingExecutor:
                         pos_ratio = v
                 except Exception:
                     pass
+            ref_px = order_price if order_price > 0 else trig
+            local_qty = _to_local_qty(pos_ratio, ref_px)
             if action == 'close':
                 if ctx.position > 0:
-                    out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    out.append({'type': 'close_long', 'trigger_price': ref_px, 'position_size': 0, 'timestamp': ts_i})
                     ctx.position.clear_position()
                 elif ctx.position < 0:
-                    out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                    out.append({'type': 'close_short', 'trigger_price': ref_px, 'position_size': 0, 'timestamp': ts_i})
                     ctx.position.clear_position()
                 continue
             if action == 'buy':
                 if is_grid_bot:
                     if ctx.position < 0:
-                        out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.reduce_position(pos_ratio)
+                        out.append({'type': 'close_short', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.reduce_position(local_qty)
                     elif ctx.position == 0:
-                        out.append({'type': 'open_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.open_position('long', order_price or trig, pos_ratio)
+                        out.append({'type': 'open_long', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.open_position('long', ref_px, local_qty)
                     else:
-                        out.append({'type': 'add_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.add_position(order_price or trig, pos_ratio)
+                        out.append({'type': 'add_long', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.add_position(ref_px, local_qty)
                 else:
                     if ctx.position < 0:
-                        out.append({'type': 'close_short', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                        out.append({'type': 'close_short', 'trigger_price': ref_px, 'position_size': 0, 'timestamp': ts_i})
                         ctx.position.clear_position()
                     if td in ('long', 'both'):
                         if ctx.position == 0:
-                            out.append({'type': 'open_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                            ctx.position.open_position('long', order_price or trig, pos_ratio)
+                            out.append({'type': 'open_long', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                            ctx.position.open_position('long', ref_px, local_qty)
                         else:
-                            out.append({'type': 'add_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                            ctx.position.add_position(order_price or trig, pos_ratio)
+                            out.append({'type': 'add_long', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                            ctx.position.add_position(ref_px, local_qty)
                 continue
             if action == 'sell':
                 if is_grid_bot:
                     if ctx.position > 0:
-                        out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.reduce_position(pos_ratio)
+                        out.append({'type': 'close_long', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.reduce_position(local_qty)
                     elif ctx.position == 0:
-                        out.append({'type': 'open_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.open_position('short', order_price or trig, pos_ratio)
+                        out.append({'type': 'open_short', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.open_position('short', ref_px, local_qty)
                     else:
-                        out.append({'type': 'add_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                        ctx.position.add_position(order_price or trig, pos_ratio)
+                        out.append({'type': 'add_short', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                        ctx.position.add_position(ref_px, local_qty)
                 else:
                     if ctx.position > 0:
-                        out.append({'type': 'close_long', 'trigger_price': order_price or trig, 'position_size': 0, 'timestamp': ts_i})
+                        out.append({'type': 'close_long', 'trigger_price': ref_px, 'position_size': 0, 'timestamp': ts_i})
                         ctx.position.clear_position()
                     if td in ('short', 'both'):
                         if ctx.position == 0:
-                            out.append({'type': 'open_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                            ctx.position.open_position('short', order_price or trig, pos_ratio)
+                            out.append({'type': 'open_short', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                            ctx.position.open_position('short', ref_px, local_qty)
                         else:
-                            out.append({'type': 'add_short', 'trigger_price': order_price or trig, 'position_size': pos_ratio, 'timestamp': ts_i})
-                            ctx.position.add_position(order_price or trig, pos_ratio)
+                            out.append({'type': 'add_short', 'trigger_price': ref_px, 'position_size': pos_ratio, 'timestamp': ts_i})
+                            ctx.position.add_position(ref_px, local_qty)
         return out
 
     def _script_evaluate_new_closed_bar(
@@ -693,7 +740,17 @@ class TradingExecutor:
         pos = len(df) - 2
         ctx.current_index = int(pos)
         row = df_exec.iloc[pos]
-        self._hydrate_script_ctx_from_positions(ctx, strategy_id, symbol)
+        _init_cap = (trading_config or {}).get('initial_capital')
+        _bar_close_for_hydrate = None
+        try:
+            _bar_close_for_hydrate = float(row.get('close') or 0)
+        except Exception:
+            _bar_close_for_hydrate = None
+        self._hydrate_script_ctx_from_positions(
+            ctx, strategy_id, symbol,
+            initial_capital=_init_cap,
+            current_price=_bar_close_for_hydrate,
+        )
         ctx._orders = []
         bar = ScriptBar(
             open=float(row.get('open') or 0),
@@ -940,7 +997,11 @@ class TradingExecutor:
                     strategy_id, df, trading_config, initial_capital
                 )
                 if on_init_script:
-                    self._hydrate_script_ctx_from_positions(script_ctx, strategy_id, symbol)
+                    self._hydrate_script_ctx_from_positions(
+                        script_ctx, strategy_id, symbol,
+                        initial_capital=initial_capital,
+                        current_price=(float(df['close'].iloc[-1]) if df is not None and len(df) > 0 else None),
+                    )
                     try:
                         on_init_script(script_ctx)
                     except Exception as e:
@@ -1096,7 +1157,11 @@ class TradingExecutor:
                         # 3a. Bot-mode scripts: evaluate on every tick (grid/martingale need real-time price tracking)
                         if is_script and is_bot_mode and on_bar_script and script_ctx is not None:
                             try:
-                                self._hydrate_script_ctx_from_positions(script_ctx, strategy_id, symbol)
+                                self._hydrate_script_ctx_from_positions(
+                                    script_ctx, strategy_id, symbol,
+                                    initial_capital=initial_capital,
+                                    current_price=float(current_price),
+                                )
                                 script_ctx._orders = []
                                 tick_bar = ScriptBar(
                                     open=float(current_price),

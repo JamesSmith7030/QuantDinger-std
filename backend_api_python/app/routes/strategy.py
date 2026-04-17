@@ -373,6 +373,13 @@ def run_strategy_backtest():
                 'data': None
             }), 400
 
+        logger.info(
+            f"[StrategyBacktestRequest] user={user_id} strategy={strategy_id} "
+            f"{snapshot.get('market') or ''}:{snapshot.get('symbol') or ''} "
+            f"tf={timeframe} range=[{start_date_str} ~ {end_date_str}] ({days_diff}d) "
+            f"run_type={snapshot.get('run_type') or ''}"
+        )
+
         svc = get_backtest_service()
         result = svc.run_strategy_snapshot(snapshot, start_date=start_date, end_date=end_date)
         run_id = svc.persist_run(

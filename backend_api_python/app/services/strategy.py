@@ -584,11 +584,184 @@ class StrategyService:
         except Exception:
             return default
 
+    def _to_float(self, value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return float(default or 0.0)
+
+    def _to_int(self, value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return int(default or 0)
+
+    def _display_item(
+        self,
+        key: str,
+        label_key: str,
+        value: Any,
+        value_type: str = 'text',
+        value_key: str = '',
+    ) -> Dict[str, Any]:
+        return {
+            'key': key,
+            'label_key': label_key,
+            'value': value,
+            'value_type': value_type,
+            'value_key': value_key or ''
+        }
+
+    def _build_bot_display(self, trading_config: Dict[str, Any]) -> Dict[str, Any]:
+        tc = trading_config if isinstance(trading_config, dict) else {}
+        bot_type = str(tc.get('bot_type') or '').strip().lower()
+        if not bot_type:
+            return {}
+
+        params = tc.get('bot_params') if isinstance(tc.get('bot_params'), dict) else {}
+        initial_capital = self._to_float(tc.get('initial_capital'), 0.0)
+
+        display = {
+            'bot_type': bot_type,
+            'capital_label_key': 'trading-bot.wizard.initialCapital',
+            'capital_value': initial_capital,
+            'capital_value_type': 'usdt',
+            'strategy_params': [],
+            'risk_params': []
+        }
+
+        if bot_type == 'martingale':
+            display['capital_label_key'] = 'trading-bot.martingale.totalBudget'
+            multiplier = self._to_float(params.get('multiplier'), 2.0)
+            max_layers = max(1, self._to_int(params.get('maxLayers'), 5))
+            geo_sum = 0.0
+            for i in range(max_layers):
+                geo_sum += pow(multiplier, i)
+            first_order = max(0.0, (initial_capital / geo_sum) if geo_sum > 0 else 0.0)
+
+            display['strategy_params'] = [
+                self._display_item('initialAmount', 'trading-bot.martingale.initialAmountAuto', first_order, 'usdt'),
+                self._display_item('multiplier', 'trading-bot.martingale.multiplier', self._to_float(params.get('multiplier'), 2.0), 'number'),
+                self._display_item('maxLayers', 'trading-bot.martingale.maxLayers', max_layers, 'number'),
+                self._display_item('priceDropPct', 'trading-bot.martingale.priceDropTrigger', self._to_float(params.get('priceDropPct'), 0.0), 'percent'),
+                self._display_item('takeProfitPct', 'trading-bot.martingale.avgEntryTakeProfit', self._to_float(params.get('takeProfitPct'), 0.0), 'percent'),
+                self._display_item('stopLossPct', 'trading-bot.martingale.avgEntryStopLoss', self._to_float(params.get('stopLossPct'), 0.0), 'percent'),
+                self._display_item('direction', 'trading-bot.martingale.direction', params.get('direction') or 'long', 'enum', f"trading-bot.martingale.{params.get('direction') or 'long'}"),
+            ]
+            if self._to_float(tc.get('max_daily_loss'), 0.0) > 0:
+                display['risk_params'].append(
+                    self._display_item('maxDailyLoss', 'trading-bot.martingale.maxDailyLossAdvanced', self._to_float(tc.get('max_daily_loss'), 0.0), 'usdt')
+                )
+            return display
+
+        if bot_type == 'grid':
+            display['strategy_params'] = [
+                self._display_item('upperPrice', 'trading-bot.grid.upperPrice', self._to_float(params.get('upperPrice'), 0.0), 'usdt'),
+                self._display_item('lowerPrice', 'trading-bot.grid.lowerPrice', self._to_float(params.get('lowerPrice'), 0.0), 'usdt'),
+                self._display_item('gridCount', 'trading-bot.grid.gridCount', self._to_int(params.get('gridCount'), 0), 'number'),
+                self._display_item('amountPerGrid', 'trading-bot.grid.amountPerGrid', self._to_float(params.get('amountPerGrid'), 0.0), 'usdt'),
+                self._display_item('gridMode', 'trading-bot.grid.mode', params.get('gridMode') or 'arithmetic', 'enum', f"trading-bot.grid.{params.get('gridMode') or 'arithmetic'}"),
+                self._display_item('gridDirection', 'trading-bot.grid.direction', params.get('gridDirection') or 'neutral', 'enum', f"trading-bot.grid.{params.get('gridDirection') or 'neutral'}"),
+                self._display_item('orderMode', 'trading-bot.grid.orderType', params.get('orderMode') or 'maker', 'enum', 'trading-bot.grid.limitOrder' if (params.get('orderMode') or 'maker') == 'maker' else 'trading-bot.grid.marketOrder'),
+            ]
+        elif bot_type == 'trend':
+            direction = params.get('direction') or 'long'
+            direction_key = {
+                'long': 'trading-bot.trend.longOnly',
+                'short': 'trading-bot.trend.shortOnly',
+                'both': 'trading-bot.trend.bothSides'
+            }.get(direction, 'trading-bot.trend.longOnly')
+            display['strategy_params'] = [
+                self._display_item('maPeriod', 'trading-bot.trend.maPeriod', self._to_int(params.get('maPeriod'), 0), 'number'),
+                self._display_item('maType', 'trading-bot.trend.maType', params.get('maType') or 'EMA', 'text'),
+                self._display_item('confirmBars', 'trading-bot.trend.confirmBars', self._to_int(params.get('confirmBars'), 0), 'number'),
+                self._display_item('positionPct', 'trading-bot.trend.positionPct', self._to_float(params.get('positionPct'), 0.0), 'percent'),
+                self._display_item('direction', 'trading-bot.trend.direction', direction, 'enum', direction_key),
+            ]
+        elif bot_type == 'dca':
+            frequency = params.get('frequency') or 'daily'
+            frequency_key = {
+                'every_bar': 'trading-bot.dca.everyBar',
+                'hourly': 'trading-bot.dca.hourly',
+                '4h': '',
+                'daily': 'trading-bot.dca.daily',
+                'weekly': 'trading-bot.dca.weekly',
+                'biweekly': 'trading-bot.dca.biweekly',
+                'monthly': 'trading-bot.dca.monthly'
+            }.get(frequency, '')
+            display['strategy_params'] = [
+                self._display_item('amountEach', 'trading-bot.dca.amountEach', self._to_float(params.get('amountEach'), 0.0), 'usdt'),
+                self._display_item('frequency', 'trading-bot.dca.frequency', frequency, 'enum', frequency_key),
+                self._display_item('totalBudget', 'trading-bot.dca.totalBudget', self._to_float(params.get('totalBudget'), 0.0), 'usdt'),
+                self._display_item('dipBuyEnabled', 'trading-bot.dca.dipBuy', bool(params.get('dipBuyEnabled')), 'bool'),
+                self._display_item('dipThreshold', 'trading-bot.dca.dipThreshold', self._to_float(params.get('dipThreshold'), 0.0), 'percent'),
+            ]
+
+        if self._to_float(tc.get('stop_loss_pct'), 0.0) > 0:
+            display['risk_params'].append(
+                self._display_item('stopLossPct', 'trading-bot.risk.stopLossPct', self._to_float(tc.get('stop_loss_pct'), 0.0), 'percent')
+            )
+        if self._to_float(tc.get('take_profit_pct'), 0.0) > 0:
+            display['risk_params'].append(
+                self._display_item('takeProfitPct', 'trading-bot.risk.takeProfitPct', self._to_float(tc.get('take_profit_pct'), 0.0), 'percent')
+            )
+        if self._to_float(tc.get('max_position'), 0.0) > 0:
+            display['risk_params'].append(
+                self._display_item('maxPosition', 'trading-bot.risk.maxPosition', self._to_float(tc.get('max_position'), 0.0), 'usdt')
+            )
+        if self._to_float(tc.get('max_daily_loss'), 0.0) > 0:
+            display['risk_params'].append(
+                self._display_item('maxDailyLoss', 'trading-bot.risk.maxDailyLoss', self._to_float(tc.get('max_daily_loss'), 0.0), 'usdt')
+            )
+        return display
+
     def _dump_json_or_encrypt(self, obj: Any, encrypt: bool = False) -> str:
         if obj is None:
             return ''
         # Local deployment: always store plaintext JSON.
         return json.dumps(obj, ensure_ascii=False)
+
+    def _compute_runtime_metrics(self, strategy_ids: List[int]) -> Dict[int, Dict[str, float]]:
+        """批量计算策略的已实现盈亏 / 未实现盈亏 / 当前权益。"""
+        result: Dict[int, Dict[str, float]] = {}
+        if not strategy_ids:
+            return result
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                placeholders = ','.join(['%s'] * len(strategy_ids))
+                cur.execute(
+                    f"""
+                    SELECT strategy_id,
+                           COALESCE(SUM(COALESCE(profit, 0) - COALESCE(commission, 0)), 0) AS realized_pnl
+                    FROM qd_strategy_trades
+                    WHERE strategy_id IN ({placeholders})
+                    GROUP BY strategy_id
+                    """,
+                    tuple(strategy_ids),
+                )
+                for row in (cur.fetchall() or []):
+                    sid = int(row.get('strategy_id'))
+                    result.setdefault(sid, {'realized_pnl': 0.0, 'unrealized_pnl': 0.0})
+                    result[sid]['realized_pnl'] = float(row.get('realized_pnl') or 0.0)
+                cur.execute(
+                    f"""
+                    SELECT strategy_id,
+                           COALESCE(SUM(COALESCE(unrealized_pnl, 0)), 0) AS unrealized_pnl
+                    FROM qd_strategy_positions
+                    WHERE strategy_id IN ({placeholders})
+                    GROUP BY strategy_id
+                    """,
+                    tuple(strategy_ids),
+                )
+                for row in (cur.fetchall() or []):
+                    sid = int(row.get('strategy_id'))
+                    result.setdefault(sid, {'realized_pnl': 0.0, 'unrealized_pnl': 0.0})
+                    result[sid]['unrealized_pnl'] = float(row.get('unrealized_pnl') or 0.0)
+                cur.close()
+        except Exception as e:
+            logger.warning(f"compute runtime metrics failed: {e}")
+        return result
 
     def list_strategies(self, user_id: int = 1) -> List[Dict[str, Any]]:
         """List strategies for the specified user."""
@@ -607,6 +780,9 @@ class StrategyService:
                 rows = cur.fetchall() or []
                 cur.close()
 
+            ids = [int(r['id']) for r in rows if r.get('id') is not None]
+            metrics = self._compute_runtime_metrics(ids)
+
             out = []
             for r in rows:
                 ex = self._safe_json_loads(r.get('exchange_config'), {})
@@ -614,13 +790,22 @@ class StrategyService:
                 tr = self._safe_json_loads(r.get('trading_config'), {})
                 ai = self._safe_json_loads(r.get('ai_model_config'), {})
                 notify = self._safe_json_loads(r.get('notification_config'), {})
+                m = metrics.get(int(r['id']), {'realized_pnl': 0.0, 'unrealized_pnl': 0.0})
+                init_cap = float(r.get('initial_capital') or 0.0)
+                current_equity = max(0.0, init_cap + m['realized_pnl'] + m['unrealized_pnl'])
+                total_pnl = m['realized_pnl'] + m['unrealized_pnl']
                 out.append({
                     **r,
                     'exchange_config': ex,
                     'indicator_config': ind,
                     'trading_config': tr,
                     'ai_model_config': ai,
-                    'notification_config': notify
+                    'notification_config': notify,
+                    'bot_display': self._build_bot_display(tr),
+                    'realized_pnl': m['realized_pnl'],
+                    'unrealized_pnl': m['unrealized_pnl'],
+                    'total_pnl': total_pnl,
+                    'current_equity': current_equity,
                 })
             return out
         except Exception as e:
@@ -645,6 +830,18 @@ class StrategyService:
             r['trading_config'] = self._safe_json_loads(r.get('trading_config'), {})
             r['ai_model_config'] = self._safe_json_loads(r.get('ai_model_config'), {})
             r['notification_config'] = self._safe_json_loads(r.get('notification_config'), {})
+            r['bot_display'] = self._build_bot_display(r['trading_config'])
+            try:
+                m = self._compute_runtime_metrics([int(r['id'])]).get(int(r['id']), {})
+                rp = float(m.get('realized_pnl') or 0.0)
+                up = float(m.get('unrealized_pnl') or 0.0)
+                init_cap = float(r.get('initial_capital') or 0.0)
+                r['realized_pnl'] = rp
+                r['unrealized_pnl'] = up
+                r['total_pnl'] = rp + up
+                r['current_equity'] = max(0.0, init_cap + rp + up)
+            except Exception:
+                pass
             return r
         except Exception as e:
             logger.error(f"get_strategy failed: {e}")
@@ -921,9 +1118,33 @@ class StrategyService:
         notification_config = payload.get('notification_config') if payload.get('notification_config') is not None else (existing.get('notification_config') or {})
 
         indicator_config = payload.get('indicator_config') if payload.get('indicator_config') is not None else (existing.get('indicator_config') or {})
-        trading_config = payload.get('trading_config') if payload.get('trading_config') is not None else (existing.get('trading_config') or {})
         exchange_config = payload.get('exchange_config') if payload.get('exchange_config') is not None else (existing.get('exchange_config') or {})
         ai_model_config = payload.get('ai_model_config') if payload.get('ai_model_config') is not None else (existing.get('ai_model_config') or {})
+
+        # Merge trading_config 而不是整体替换,避免覆盖后端写入的运行时状态字段
+        # (如 script_runtime_state、马丁 layer/total_cost、网格 bp/sp/prev_price、DCA total_qty 等)
+        existing_tc = existing.get('trading_config') or {}
+        if not isinstance(existing_tc, dict):
+            existing_tc = {}
+        if payload.get('trading_config') is not None:
+            incoming_tc = payload.get('trading_config') or {}
+            if not isinstance(incoming_tc, dict):
+                incoming_tc = {}
+            merged_tc = dict(existing_tc)
+            merged_tc.update(incoming_tc)
+            # 保护这些运行时字段:仅当前端显式给出时才覆盖,否则保留后端写入的最新值
+            runtime_protected_keys = (
+                'script_runtime_state',
+                'last_signal_time',
+                'last_execution_time',
+                'bot_runtime_stats',
+            )
+            for _k in runtime_protected_keys:
+                if _k not in incoming_tc and _k in existing_tc:
+                    merged_tc[_k] = existing_tc[_k]
+            trading_config = merged_tc
+        else:
+            trading_config = existing_tc
 
         # When credential_id is present, strip raw API keys to avoid
         # storing secrets in the strategy record — they live in qd_exchange_credentials.

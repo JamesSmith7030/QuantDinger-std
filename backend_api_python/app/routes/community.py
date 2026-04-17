@@ -110,6 +110,43 @@ def purchase_indicator(indicator_id: int):
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 
+@community_bp.route("/indicators/<int:indicator_id>/sync", methods=["POST"])
+@login_required
+def sync_purchased_indicator(indicator_id: int):
+    """
+    同步已购买指标的最新代码
+
+    适用场景：
+        发布者在上架后又更新了指标代码，已购用户需要
+        手动拉取最新版本到自己的本地副本。
+
+    前置条件：
+        - 调用者必须已购买该指标
+        - 原始指标仍处于已发布状态
+    """
+    try:
+        service = get_community_service()
+        success, message, data = service.sync_purchased_indicator(
+            buyer_id=g.user_id,
+            indicator_id=indicator_id
+        )
+
+        if success:
+            return jsonify({'code': 1, 'msg': message, 'data': data})
+        else:
+            # 不同失败场景给到可区分的 http 状态，便于前端处理
+            status = 400
+            if message in ('indicator_not_found', 'indicator_unpublished', 'local_copy_not_found'):
+                status = 404
+            elif message == 'not_purchased':
+                status = 403
+            return jsonify({'code': 0, 'msg': message, 'data': data}), status
+
+    except Exception as e:
+        logger.error(f"sync_purchased_indicator failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
 @community_bp.route("/my-purchases", methods=["GET"])
 @login_required
 def get_my_purchases():

@@ -940,7 +940,22 @@ class BacktestService:
             # 爆仓后直接停止回测，输出结果
             if is_liquidated:
                 break
-            
+
+            # bar_time: floor of execution timestamp to signal timeframe.
+            # This is the chart-bar that the front-end displays and is used to
+            # anchor buy/sell overlays — prevents sub-bar offset when exec_tf
+            # is finer than signal_tf (e.g. 1m execution on a 1h chart).
+            try:
+                bar_time_str = timestamp.floor(f'{signal_tf_seconds}s').strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                # Fallback: round down manually via epoch seconds
+                try:
+                    epoch = int(timestamp.timestamp())
+                    floored = (epoch // signal_tf_seconds) * signal_tf_seconds
+                    bar_time_str = datetime.utcfromtimestamp(floored).strftime('%Y-%m-%d %H:%M')
+                except Exception:
+                    bar_time_str = timestamp.strftime('%Y-%m-%d %H:%M')
+
             if position == 0 and capital < min_capital_to_trade:
                 is_liquidated = True
                 capital = 0
@@ -1031,6 +1046,7 @@ class BacktestService:
                                 total_commission_paid += commission_fee
                                 trades.append({
                                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                    'bar_time': bar_time_str,
                                     'type': 'close_long_stop',
                                     'price': round(exec_price, 4),
                                     'amount': round(position, 4),
@@ -1058,6 +1074,7 @@ class BacktestService:
                                     total_commission_paid += commission_fee
                                     trades.append({
                                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                        'bar_time': bar_time_str,
                                         'type': 'close_long_trailing',
                                         'price': round(exec_price, 4),
                                         'amount': round(position, 4),
@@ -1081,6 +1098,7 @@ class BacktestService:
                                 total_commission_paid += commission_fee
                                 trades.append({
                                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                    'bar_time': bar_time_str,
                                     'type': 'close_long_profit',
                                     'price': round(exec_price, 4),
                                     'amount': round(position, 4),
@@ -1112,6 +1130,7 @@ class BacktestService:
                                     is_liquidated = True
                                     trades.append({
                                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                        'bar_time': bar_time_str,
                                         'type': 'liquidation',
                                         'price': round(exec_price, 4),
                                         'amount': round(shares, 4),
@@ -1123,6 +1142,7 @@ class BacktestService:
                                     total_commission_paid += commission_fee
                                     trades.append({
                                         'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                        'bar_time': bar_time_str,
                                         'type': 'close_short_stop',
                                         'price': round(exec_price, 4),
                                         'amount': round(shares, 4),
@@ -1152,6 +1172,7 @@ class BacktestService:
                                         is_liquidated = True
                                         trades.append({
                                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                            'bar_time': bar_time_str,
                                             'type': 'liquidation',
                                             'price': round(exec_price, 4),
                                             'amount': round(shares, 4),
@@ -1163,6 +1184,7 @@ class BacktestService:
                                         total_commission_paid += commission_fee
                                         trades.append({
                                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                            'bar_time': bar_time_str,
                                             'type': 'close_short_trailing',
                                             'price': round(exec_price, 4),
                                             'amount': round(shares, 4),
@@ -1186,6 +1208,7 @@ class BacktestService:
                                 total_commission_paid += commission_fee
                                 trades.append({
                                     'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                    'bar_time': bar_time_str,
                                     'type': 'close_short_profit',
                                     'price': round(exec_price, 4),
                                     'amount': round(shares, 4),
@@ -1224,6 +1247,7 @@ class BacktestService:
                             total_commission_paid += close_commission
                             trades.append({
                                 'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                'bar_time': bar_time_str,
                                 'type': 'close_short',
                                 'price': round(close_price, 4),
                                 'amount': round(shares_to_close, 4),
@@ -1260,6 +1284,7 @@ class BacktestService:
                         lowest_since_entry = exec_price
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                            'bar_time': bar_time_str,
                             'type': 'open_long',
                             'price': round(exec_price, 4),
                             'amount': round(shares, 4),
@@ -1281,6 +1306,7 @@ class BacktestService:
                         total_commission_paid += commission_fee
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                            'bar_time': bar_time_str,
                             'type': 'close_long',
                             'price': round(exec_price, 4),
                             'amount': round(position, 4),
@@ -1312,6 +1338,7 @@ class BacktestService:
                             total_commission_paid += close_commission
                             trades.append({
                                 'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                                'bar_time': bar_time_str,
                                 'type': 'close_long',
                                 'price': round(close_price, 4),
                                 'amount': round(position, 4),
@@ -1348,6 +1375,7 @@ class BacktestService:
                         lowest_since_entry = exec_price
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                            'bar_time': bar_time_str,
                             'type': 'open_short',
                             'price': round(exec_price, 4),
                             'amount': round(shares, 4),
@@ -1370,6 +1398,7 @@ class BacktestService:
                         total_commission_paid += commission_fee
                         trades.append({
                             'time': timestamp.strftime('%Y-%m-%d %H:%M'),
+                            'bar_time': bar_time_str,
                             'type': 'close_short',
                             'price': round(exec_price, 4),
                             'amount': round(shares, 4),
@@ -1757,37 +1786,64 @@ class BacktestService:
                 logger.warning(f"Requested end date {end_date} is after available data end {data_end}. "
                              f"Using available end date instead. This may affect backtest results.")
             
-            # Filter date range (use available data range if requested range is outside)
-            # If data ends before requested end_date, use the most recent data up to the requested limit
-            if data_end < end_date:
-                # Data ends before requested end date - use the most recent data
-                # Calculate how many candles we need based on requested time range
-                requested_seconds = (end_date - start_date).total_seconds()
-                requested_candles = math.ceil(requested_seconds / tf_seconds)
-                # Take the most recent N candles from available data
-                if len(df) > requested_candles:
-                    df_filtered = df.tail(requested_candles).copy()
+            # Filter date range strictly by requested [start_date, end_date].
+            # Even when data_end < end_date (common when end_date is "today" and the last
+            # candle is still forming), we MUST filter by start_date — otherwise two runs
+            # with different start_dates but the same end_date could fall back to the
+            # same "tail N candles" slice whenever the upstream fetch happened to return
+            # an identical-sized window (rate limits / pagination caps / tiny history).
+            effective_start = max(start_date, data_start)
+            effective_end = min(end_date, data_end)
+            if effective_start > effective_end:
+                # Requested window sits entirely before or after available data
+                logger.error(
+                    f"Requested range [{start_date} ~ {end_date}] does not overlap "
+                    f"with available data [{data_start} ~ {data_end}] for "
+                    f"{market}:{symbol} {timeframe}. Backtest will return empty data."
+                )
+                return pd.DataFrame()
+
+            df_filtered = df[(df.index >= effective_start) & (df.index <= effective_end)].copy()
+            used_fallback = False
+
+            # Diagnostics: did we actually cover a meaningful portion of the requested range?
+            requested_seconds = max(1.0, (end_date - start_date).total_seconds())
+            covered_seconds = 0.0
+            if not df_filtered.empty:
+                covered_seconds = (df_filtered.index.max() - df_filtered.index.min()).total_seconds()
+            coverage_ratio = covered_seconds / requested_seconds if requested_seconds > 0 else 0.0
+
+            if df_filtered.empty:
+                # Last-resort fallback: take the most recent N candles. This should be rare
+                # and is explicitly flagged so the user can see that their requested window
+                # was not honored verbatim.
+                requested_candles = max(1, math.ceil(requested_seconds / tf_seconds))
+                if len(df) > 0:
+                    df_filtered = df.tail(min(len(df), requested_candles)).copy()
                     effective_start = df_filtered.index.min()
                     effective_end = df_filtered.index.max()
+                    used_fallback = True
+                    logger.warning(
+                        f"[Backtest] No candles in requested range [{start_date} ~ {end_date}] "
+                        f"for {market}:{symbol} {timeframe}. Falling back to latest "
+                        f"{len(df_filtered)} candles ({effective_start} ~ {effective_end}). "
+                        f"This almost certainly means upstream data does not cover your date range."
+                    )
                 else:
-                    # Use all available data
-                    df_filtered = df.copy()
-                    effective_start = data_start
-                    effective_end = data_end
-                    logger.warning(f"Available data ({len(df)} candles) is less than requested ({requested_candles} candles). "
-                                 f"Using all available data from {effective_start} to {effective_end}")
-            else:
-                # Normal case: filter by requested date range
-                effective_start = max(start_date, data_start)
-                effective_end = min(end_date, data_end)
-                df_filtered = df[(df.index >= effective_start) & (df.index <= effective_end)].copy()
-            
-            if df_filtered.empty:
-                logger.error(f"After filtering date range ({effective_start} to {effective_end}), no data remains. "
-                             f"Available data range: {data_start} to {data_end}, requested: {start_date} to {end_date}")
-                return pd.DataFrame()
-            
-            logger.info(f"After filtering: {len(df_filtered)} candles remain for backtest (effective range: {effective_start} to {effective_end})")
+                    logger.error(
+                        f"[Backtest] After filtering {market}:{symbol} {timeframe} to "
+                        f"{effective_start}~{effective_end}, no candles remain. "
+                        f"Upstream range was {data_start}~{data_end}."
+                    )
+                    return pd.DataFrame()
+
+            logger.info(
+                f"[Backtest] {market}:{symbol} {timeframe} | "
+                f"requested [{start_date} ~ {end_date}] | "
+                f"upstream [{data_start} ~ {data_end}] ({len(df)} candles) | "
+                f"effective [{effective_start} ~ {effective_end}] ({len(df_filtered)} candles) | "
+                f"coverage={coverage_ratio*100:.1f}% | fallback={used_fallback}"
+            )
             _kline_cache.put(cache_key, df_filtered, timeframe)
             return df_filtered
             
@@ -2305,8 +2361,25 @@ class BacktestService:
         else:
             raise ValueError("signals dict must contain either 4-way keys or buy/sell keys.")
 
+        try:
+            data_start = df.index.min()
+            data_end = df.index.max()
+        except Exception:
+            data_start = data_end = None
+        try:
+            ol = int(norm.get('open_long').sum()) if hasattr(norm.get('open_long'), 'sum') else 0
+            cl = int(norm.get('close_long').sum()) if hasattr(norm.get('close_long'), 'sum') else 0
+            os_ = int(norm.get('open_short').sum()) if hasattr(norm.get('open_short'), 'sum') else 0
+            cs = int(norm.get('close_short').sum()) if hasattr(norm.get('close_short'), 'sum') else 0
+        except Exception:
+            ol = cl = os_ = cs = -1
+        logger.info(
+            f"[Backtest] simulate_trading: {len(df)} candles [{data_start} ~ {data_end}], "
+            f"signals open_long={ol} close_long={cl} open_short={os_} close_short={cs}, "
+            f"direction={trade_direction}"
+        )
         return self._simulate_trading_new_format(df, norm, initial_capital, commission, slippage, leverage, trade_direction, strategy_config)
-    
+
     def _simulate_trading_new_format(
         self,
         df: pd.DataFrame,

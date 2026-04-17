@@ -272,10 +272,23 @@ class CryptoDataSource(BaseDataSource):
             
             # 过滤和限制
             klines = self.filter_and_limit(klines, limit, before_time)
-            
+
             # 记录结果
             self.log_result(symbol, klines, timeframe)
-            
+
+            # Concise trace so backtest logs can correlate requested window with actual window
+            if klines:
+                try:
+                    from datetime import datetime as _dt
+                    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+                    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+                    logger.info(
+                        f"[CryptoKline] {symbol} {timeframe} returned {len(klines)} candles, "
+                        f"utc_range={first_ts}~{last_ts}, limit={limit}, before_time={before_time}"
+                    )
+                except Exception:
+                    pass
+
         except Exception as e:
             logger.error(f"Failed to fetch crypto K-lines {symbol}: {str(e)}")
             import traceback

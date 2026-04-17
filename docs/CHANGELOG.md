@@ -4,6 +4,166 @@ This document records version updates, new features, bug fixes, and database mig
 
 ---
 
+## V3.0.4 (2026-04-11) — 多语言文件全量补齐(AI 自动翻译)
+
+### 🌍 i18n
+
+此前除 `zh-CN` / `en-US` 外,其余 7 个语言文件只有约 2000/4240 条(约 48% 覆盖),大量界面字段会回退到英文或 key 名。这次用 DeepSeek 把全部缺失 key 一次性批量翻译、写回源文件:
+
+| 语言 | 修复前 | 修复后 | 新增条目 |
+|---|---|---|---|
+| `ar-SA` Arabic  | 2029 | **4573** | 2541 |
+| `de-DE` German  | 2077 | **4573** | 2491 (+patch) |
+| `en-US` English | 4424 | **4498** | 72 |
+| `fr-FR` French  | 2029 | **4573** | 2539 (+patch) |
+| `ja-JP` Japanese| 2033 | **4573** | 2537 (+patch) |
+| `ko-KR` Korean  | 2034 | **4573** | 2537 (+patch) |
+| `th-TH` Thai    | 2029 | **4573** | 2541 (+patch) |
+| `vi-VN` Vietnamese | 1759 | **4495** | 2734 (+patch) |
+| `zh-TW` Traditional | 3741 | **4499** | 758 |
+
+全部 9 个语言文件相对 `zh-CN` 基准 **missing = 0** ✅
+
+### 🛠️ Tooling (新增)
+
+- **`scripts/i18n-diff.js`** — 扫描所有 locale 文件,以 `zh-CN` 为基准报告 missing / extra keys;支持 `--detail`、`--lang=xx-YY` 查看具体缺失。
+- **`scripts/i18n-fill-ai.js`** — 增量 AI 翻译工具。支持 DeepSeek / Anthropic / OpenAI / OpenRouter 四家 provider,批量(默认 80/batch)+ 并发(默认 6)+ 本地缓存(`scripts/.i18n-cache/`)+ 自动备份(`*.js.bak`),字符串值按安全追加方式写回文件。失败批次 3 次重试 + 部分保留策略。保护占位符 `{foo}`、`<code>…</code>`、换行符 `\n`、HTML 标签、`BTC/ETH/USDT/AI/MT5` 等专有名词。
+- **`scripts/i18n-patch-specials.js`** — 一次性补齐 AI 脚本无法覆盖的特殊 key:空字符串值、嵌套对象值(`trading-assistant.brokerNames`)、中文量词单字(`dashboard.unit.trades` / `.strategies` 等在西语/泰/越留空)。
+- **`scripts/README.md`** — 工具链说明,含典型用法、API Key 配置、成本估算、质量提示。
+- **`.gitignore`** — 忽略 `scripts/.i18n-cache/` 与 `QuantDinger-Vue-src/src/locales/lang/*.bak`。
+
+### 翻译质量
+
+专用术语已落地行业译法:网格(`neutral/long/short`)、Maker/Taker 指值/市价、加仓/平仓、止盈/止损、浮动盈亏、权益、仓位、挂单、成交等。占位符 / `<code>` 标签 / 代码示例全部保留。单次批量失败率 < 0.2%,失败 key 已由 specials 脚本兜底。
+
+### ⚠️ 已知事项(后续改进)
+
+- **`ja-JP` / `zh-TW` 等部分"已存在但值是英文"的 key 未被重译**:脚本只填「完全缺失」的 key,不覆写已有值。若要纠正这部分"占位英文",需要单独一次「识别非目标语言内容并重译」的增强扫描。
+
+### 🗄️ Database Migration
+
+无。
+
+### 📦 Files Changed
+
+- `QuantDinger-Vue-src/src/locales/lang/{ar-SA,de-DE,en-US,fr-FR,ja-JP,ko-KR,th-TH,vi-VN,zh-TW}.js`
+- `scripts/i18n-diff.js`、`scripts/i18n-fill-ai.js`、`scripts/i18n-patch-specials.js`、`scripts/README.md`
+- `.gitignore`
+
+---
+
+## V3.0.3 (2026-04-11) — 交易机器人全链路修复(Grid / Martingale / Trend / DCA)
+
+### 🐛 Bug Fixes — 交易机器人
+
+针对四类机器人(网格 / 马丁 / 趋势 / 定投)做了从前端配置、脚本模板、后端执行到列表/详情页数据的端到端审计与修复:
+
+- **[P0-1] 编辑机器人会清空运行时状态**:`StrategyService.update_strategy` 此前直接用 payload 里的 `trading_config` 整体替换老记录,导致 `script_runtime_state`(马丁 `layer`/`total_cost`、网格 `bp/sp/prev_price`、DCA `total_qty` 等)被一把抹掉,改完参数重启就像换了台新机器人。改为 `{**existing, **incoming}` 浅合并,并保护 `script_runtime_state`、`last_signal_time`、`last_execution_time`、`bot_runtime_stats` 等后端维护的运行时字段。
+- **[P0-2] 网格空头不受预算控制**:旧 `total_spent` 只在买入时累加,卖出开空(中性/做空模式)既不检查也不累加,合约下可以把空头无限放大直至爆仓。重写网格脚本改为 `long_exposure` / `short_exposure` 双路独立核算,BUY 先抵扣空头再开多(做多侧过预算就跳过),SELL 同理。
+- **[P0-3] 马丁/趋势默认 `maker` 限价挂单导致漏触发和重复下单**:马丁每层加仓依赖上一单「已成交」才会更新 `last_entry_price`,挂单未成交时脚本在下一根 K 线用同一价格重新发单,出现一次开仓就下两笔甚至多笔的现象。向导 `buildPayload` 对 `bot_type` 为 `martingale` / `trend` 强制 `order_mode='market'`,网格/DCA 保留用户选择(默认 maker 更省费)。
+- **[P0-4] 网格/DCA 在同一 tick 多笔减仓的本地持仓跟踪错误**:`_script_orders_to_execution_signals` 把脚本传来的 USDT 名义金额直接丢给 `ctx.position.reduce_position/add_position/open_position`(这些方法内部以 qty 单位计数),导致同一 tick 内若先后发 sell + sell,第二笔会被误判为「开空」而不是「继续平多」,发出错误的 `open_short` 信号。修复:把 USDT 金额按 `usdt * leverage / ref_price` 换算成近似 qty 再更新本地 ctx.position(真实下单数量依旧由 `_execute_signal` 按杠杆/市场类型重算,完全不变)。
+- **[P0-5] DCA 频率被 K 线周期吞掉**:`intervalBars = round(freqMin / tfMin)` 当 `freq<tf`(比如 4h 线上选 hourly)会取整到 0,再 `max(1,0)=1`,结果变成「每根 K 线都买」(等于 4 小时 1 次)。把 DCA 脚本改成 **基于真实时间戳** 的 `INTERVAL_SEC = freqMin * 60`,用 `now - last_buy_ts >= INTERVAL_SEC` 判断,彻底与 K 线周期解耦。
+
+### 🔧 Improvements
+
+- **[P1] 机器人列表/详情返回运行时指标**:`list_strategies` / `get_strategy` 通过一次 GROUP BY 批量查 `qd_strategy_trades.profit-commission` 和 `qd_strategy_positions.unrealized_pnl`,在响应里附带 `realized_pnl` / `unrealized_pnl` / `total_pnl` / `current_equity`,前端 KPI 和卡片不再需要自己拼。
+- **[P1] 趋势机器人仓位按实时权益计算**:`_hydrate_script_ctx_from_positions` 在 hydrate 持仓的同时把 `ctx.balance` / `ctx.equity` 刷新为 `initial_capital + 已实现 + 未实现` 的最新值,趋势脚本里 `amt = ctx.balance * POS_PCT` 终于能跟着账户净值走,而不是始终停在初始资金。
+- **[P1] DCA 仓位被外部平掉后自动重置**:DCA 脚本每根 bar 检查 `buy_count>0 且 total_qty>0 但 ctx.position 为空` 的情况,判定为手动/止损平仓并清零累计状态,下一轮定投正常重新开始。
+- **[P1] 网格/DCA 前端参数校验**:`GridConfig` 新增上下限大小校验、等比网格下限>0 校验、以及「每格金额 × 网格数 ≤ 初始资金」校验;`DCAConfig` 新增「单次金额 ≤ 总预算」校验。多语言已补齐 10 种。
+
+### 🗄️ Database Migration
+
+本次无新增列/表,仅代码层修复。已有部署**不需要**执行任何 SQL。
+
+### 📦 Files Changed
+
+- `backend_api_python/app/services/strategy.py` — `update_strategy` 合并逻辑、`_compute_runtime_metrics`、列表/详情附带运行时指标
+- `backend_api_python/app/services/trading_executor.py` — `_script_orders_to_execution_signals` USDT→qty 换算、`_hydrate_script_ctx_from_positions` 刷新 balance/equity
+- `QuantDinger-Vue-src/src/views/trading-bot/components/BotCreateWizard.vue` — 马丁/趋势强制市价
+- `QuantDinger-Vue-src/src/views/trading-bot/components/botScriptTemplates.js` — 网格双路预算、DCA 时间制间隔与外部平仓重置
+- `QuantDinger-Vue-src/src/views/trading-bot/components/configs/GridConfig.vue`、`DCAConfig.vue` — 参数校验
+- `QuantDinger-Vue-src/src/locales/lang/*.js` — 4 条新校验文案 × 10 语言
+
+---
+
+## V3.0.2 (2026-04-17) — 指标社区「同步代码」+ Martingale / 回测稳定性
+
+### 🚀 New Features
+
+- **指标社区 · 同步代码**：指标详情弹窗为已购用户在「立即使用」旁新增「同步代码」按钮。发布者更新并重新上架后，已购用户可一键把最新代码拉到自己的本地副本；前端带 `Tooltip`、确认弹窗与「有更新」橙色标记，暗色主题单独适配。
+  - 新接口：`POST /api/community/indicators/<id>/sync`
+  - 详情接口 `GET /api/community/indicators/<id>` 新增字段：`has_update`、`local_copy_id`
+  - 本地副本与原始指标通过新增的 `qd_indicator_codes.source_indicator_id` 建立持久关联；老数据按名称兜底匹配并在首次同步时回填该字段。
+- **交易机器人 · 参数标准化**：Martingale / Grid / Trend / DCA 四类机器人参数统一语义，创建确认页、列表页、详情页展示完全对齐，后端 `bot_display` 统一结构，前端映射大幅简化。
+- **Martingale 重复开仓修复**：策略启动瞬间会立即下两笔单的问题修复（信号去重 + 当次循环内的市值/持仓校验）。
+
+### 🐛 Bug Fixes
+
+- **回测日期范围失效**：调整回测起止日期但结果不变的严重问题修复。根因为 `_fetch_kline_data` 在上游数据覆盖不全时会退化为 `df.tail(N)`，忽略 `start_date` 约束。改为严格按「请求区间 ∩ 可用区间」过滤；无交集时直接报错；确需兜底时打印 `WARNING` 并标记 `fallback=True`。新增 `[BacktestRequest]`、`[Backtest] … requested/upstream/effective`、`[CryptoKline] …` 等诊断日志，便于排查数据源覆盖问题。
+- **回测后 K 线 Buy/Sell 标记错位**：指标 IDE 运行回测后，K 线上的 B / S 标记可能整体往后偏移一根 K 线（多时间框架 MTF 模式下尤为明显）。根因有两点：
+  1. 开启 MTF 后，后端执行时间框架（exec_tf）会自动切换到 `1m` 或 `5m`，`trade.time` 记录的是 exec_tf 级时间戳；但前端 K 线显示的是用户选择的信号 TF（如 `1h`）。
+  2. 前端使用「就近」对齐（nearest-snap），当 SL / TP / Trailing 等触发发生在信号 TF 柱的后半段时，会被吸附到**下一根**柱，造成整根柱的错位。
+
+  修复：
+  - 后端 `_simulate_trading_mtf` 对每笔 trade 新增 `bar_time` 字段 —— 把 exec_tf 时间戳 floor 到信号 TF，得到 trade 实际所属的**图表柱**起点时间（UTC，`'%Y-%m-%d %H:%M'`）。
+  - 前端 `renderBacktestSignals` 改为**优先使用 `trade.bar_time`**（已经是图表柱对齐），并把「就近」改为 **floor-snap**（定位到包含该时间的最后一根 K 线），彻底消除 ±1 根柱的偏移。
+  - 非 MTF 路径无需改动：`trade.time` 本身就等于信号 TF 柱时间，前端回退到 `trade.time` 后依旧正确对齐。
+  - 改动文件：`backend_api_python/app/services/backtest.py`、`QuantDinger-Vue-src/src/views/indicator-ide/index.vue`。
+
+### 🗄️ Database Migration
+
+本次新增一列 + 一个索引，用于指标社区「同步代码」定位买家本地副本：
+
+```sql
+-- 1. 新列：买家本地副本 -> 市场原始指标 的外键关联（软外键，NULL 兼容老数据）
+ALTER TABLE qd_indicator_codes
+    ADD COLUMN IF NOT EXISTS source_indicator_id INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_indicator_codes_source
+    ON qd_indicator_codes USING btree (source_indicator_id);
+
+-- 2. 可选回填：给已有的已购副本按名称回写 source_indicator_id
+--    安全条件：仅写 is_buy=1 且 source_indicator_id IS NULL 的行，按 (买家ID, 原指标名) 匹配
+UPDATE qd_indicator_codes lc
+SET    source_indicator_id = p.indicator_id
+FROM   qd_indicator_purchases p
+JOIN   qd_indicator_codes orig ON orig.id = p.indicator_id
+WHERE  lc.user_id = p.buyer_id
+  AND  lc.is_buy = 1
+  AND  lc.source_indicator_id IS NULL
+  AND  lc.name = orig.name;
+```
+
+**已在开发环境 Docker 中执行完毕**（`ALTER TABLE` + `CREATE INDEX` 均返回成功，回填 `UPDATE 4`）。新库使用当前仓库中的 `migrations/init.sql` 初始化已包含该列定义，无需重复执行。
+
+**在已有库上手动执行（Docker 一行示例）：**
+
+```bash
+docker compose exec -T postgres psql -U quantdinger -d quantdinger <<'SQL'
+ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS source_indicator_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_indicator_codes_source ON qd_indicator_codes USING btree (source_indicator_id);
+UPDATE qd_indicator_codes lc
+SET source_indicator_id = p.indicator_id
+FROM qd_indicator_purchases p
+JOIN qd_indicator_codes orig ON orig.id = p.indicator_id
+WHERE lc.user_id = p.buyer_id
+  AND lc.is_buy = 1
+  AND lc.source_indicator_id IS NULL
+  AND lc.name = orig.name;
+SQL
+```
+
+> 服务启动时 `CommunityService.__init__` 亦带 `ADD COLUMN IF NOT EXISTS`，作为冗余保障（向后兼容）。
+
+### 🎨 Frontend / i18n
+
+- `QuantDinger-Vue-src/package.json`、`src/config/defaultSettings.js`、`src/layouts/BasicLayout.vue` 版本号 `3.0.1 → 3.0.2`；`README.md` 与 `docs/README_CN.md` 版本徽章同步。
+- `zh-CN / zh-TW / en-US` 新增 12 条 `community.sync*` / `community.hasUpdate` / `community.already_latest` 等 i18n key；其他语言沿用英文 fallback。
+- 重新执行 `npm run build` 并同步 `dist/` 至 `frontend/dist/`，`docker compose build frontend` 已重打镜像。
+- **补丁**：回测 Buy/Sell 标记错位修复后再次 `npm run build` + 同步 `frontend/dist/` + `docker compose build backend frontend && up -d backend frontend`，无需额外数据库变更。
+
+---
+
 ## 2026-04-07 — 数据库：`qd_market_symbols` 补充 A股 / H股热门标的
 
 已在 **Docker** 内对运行中的 PostgreSQL 执行完毕（`INSERT 0 20`）。**新库**若使用当前仓库中的 `migrations/init.sql` 初始化，已包含同批种子数据，无需重复执行。

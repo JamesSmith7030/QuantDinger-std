@@ -237,8 +237,15 @@ def run_backtest():
                 'msg': f'Backtest range exceeds limit: timeframe {timeframe} supports up to {max_range_text} ({max_days} days), but you selected {days_diff} days',
                 'data': None
             }), 400
-        
-        
+
+        # Explicit audit log so we can always trace exactly which window the user asked for.
+        logger.info(
+            f"[BacktestRequest] user={user_id} indicator={indicator_id} {market}:{symbol} "
+            f"tf={timeframe} range=[{start_date_str} ~ {end_date_str}] ({days_diff}d) "
+            f"capital={initial_capital} leverage={leverage} direction={trade_direction} "
+            f"mtf={enable_mtf}"
+        )
+
         # 执行回测（支持多时间框架高精度回测）
         # 加密货币市场且启用MTF时，使用多时间框架回测
         if enable_mtf and market.lower() in ['crypto', 'cryptocurrency']:
