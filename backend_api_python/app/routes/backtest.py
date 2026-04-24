@@ -10,6 +10,7 @@ import time
 import os
 
 from app.services.backtest import BacktestService
+from app.data_sources.factory import DataSourceFactory
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
 from app.utils.auth import login_required
@@ -183,8 +184,10 @@ def run_backtest():
                 'data': None
             }), 400
         indicator_id = data.get('indicatorId')
-        symbol = data.get('symbol', '')
-        market = data.get('market', '')
+        symbol = (data.get('symbol') or '').strip()
+        market = (data.get('market') or '').strip()
+        # 数据源仅由请求里的市场分类决定（与前端自选一致）；此处只做大小写/别名规范化
+        market = DataSourceFactory.normalize_market(market)
         timeframe = data.get('timeframe', '1D')
         start_date_str = data.get('startDate', '')
         end_date_str = data.get('endDate', '')

@@ -3,7 +3,7 @@
 使用 CCXT (Coinbase) 获取数据
 """
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import ccxt
 
 from app.data_sources.base import BaseDataSource, TIMEFRAME_SECONDS
@@ -234,7 +234,8 @@ class CryptoDataSource(BaseDataSource):
         symbol: str,
         timeframe: str,
         limit: int,
-        before_time: Optional[int] = None
+        before_time: Optional[int] = None,
+        after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """获取加密货币K线数据"""
         klines = []
@@ -251,7 +252,9 @@ class CryptoDataSource(BaseDataSource):
             
             # logger.info(f"获取加密货币K线: {symbol_pair}, 周期: {ccxt_timeframe}, 条数: {limit}")
             
-            ohlcv = self._fetch_ohlcv(symbol_pair, ccxt_timeframe, limit, before_time, timeframe)
+            ohlcv = self._fetch_ohlcv(
+                symbol_pair, ccxt_timeframe, limit, before_time, timeframe, after_time
+            )
             
             if not ohlcv:
                 logger.warning(f"CCXT returned no K-lines: {symbol_pair}")
@@ -270,8 +273,14 @@ class CryptoDataSource(BaseDataSource):
                     volume=candle[5]
                 ))
             
-            # 过滤和限制
-            klines = self.filter_and_limit(klines, limit, before_time)
+            # 过滤和限制（回测带 after_time 时保留整段窗口，避免 [-limit:] 丢掉左端历史）
+            klines = self.filter_and_limit(
+                klines,
+                limit,
+                before_time,
+                after_time,
+                truncate=(after_time is None),
+            )
 
             # 记录结果
             self.log_result(symbol, klines, timeframe)
@@ -302,53 +311,72 @@ class CryptoDataSource(BaseDataSource):
         ccxt_timeframe: str,
         limit: int,
         before_time: Optional[int],
-        timeframe: str
+        timeframe: str,
+        after_time: Optional[int] = None,
     ) -> List:
         """获取OHLCV数据（支持分页获取完整数据）"""
         try:
             if before_time:
-                # 计算时间范围
+                # 计算时间范围（UTC，与交易所 OHLCV 毫秒时间戳一致）
                 total_seconds = self.calculate_time_range(timeframe, limit)
-                end_time = datetime.fromtimestamp(before_time)
-                start_time = end_time - timedelta(seconds=total_seconds)
-                since = int(start_time.timestamp() * 1000)
-                end_ms = before_time * 1000
-                
-                # logger.info(f"历史数据请求: since={since//1000}, end={before_time}, 时间跨度={total_seconds/86400:.1f}天")
-                
-                # 分页获取数据，直到覆盖完整时间范围
-                all_ohlcv = []
+                # 回测里 before_time = end_date+1 天，常比「当前时刻」更晚；Coinbase 会报
+                # start must not be in the future（其 start 指查询上界/窗口边界）
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                safe_before_ts = min(int(before_time), now_ts)
+                if safe_before_ts < int(before_time):
+                    logger.debug(
+                        "CCXT OHLCV: clamped before_time %s -> %s (utc now cap for exchange)",
+                        before_time,
+                        safe_before_ts,
+                    )
+                end_dt = datetime.fromtimestamp(safe_before_ts, tz=timezone.utc)
+                start_dt = end_dt - timedelta(seconds=total_seconds)
+                if after_time is not None:
+                    floor_dt = datetime.fromtimestamp(int(after_time), tz=timezone.utc)
+                    start_dt = min(start_dt, floor_dt)
+                timeframe_ms = TIMEFRAME_SECONDS.get(timeframe, 86400) * 1000
+                now_ms = now_ts * 1000
+                since = int(start_dt.timestamp() * 1000)
+                if since >= now_ms:
+                    since = max(0, now_ms - timeframe_ms)
+                end_ms = safe_before_ts * 1000
+
+                all_ohlcv: List[List[Any]] = []
                 batch_limit = 300  # Coinbase limit is often 300, safer than 1000
                 current_since = since
-                
-                while current_since < end_ms:
-                    batch = self.exchange.fetch_ohlcv(
-                        symbol_pair, 
-                        ccxt_timeframe, 
-                        since=current_since, 
-                        limit=batch_limit
-                    )
-                    
-                    if not batch:
+                max_batches = 6000
+                empty_streak = 0
+                max_empty = 6
+
+                for _ in range(max_batches):
+                    if current_since >= end_ms:
                         break
-                    
+                    batch = self.exchange.fetch_ohlcv(
+                        symbol_pair,
+                        ccxt_timeframe,
+                        since=current_since,
+                        limit=batch_limit,
+                    )
+                    if not batch:
+                        empty_streak += 1
+                        if empty_streak >= max_empty:
+                            break
+                        # 跳过可能的空档，避免卡死在同一 since
+                        current_since += timeframe_ms * min(batch_limit, 64)
+                        continue
+                    empty_streak = 0
                     all_ohlcv.extend(batch)
-                    
-                    # 获取最后一条数据的时间，作为下次请求的起始时间
                     last_timestamp = batch[-1][0]
-                    
-                    # 如果最后一条数据时间超过了结束时间，或者返回数据少于请求量，说明已经获取完毕
-                    # if last_timestamp >= end_ms or len(batch) < batch_limit:
                     if last_timestamp >= end_ms:
                         break
-                    
-                    # 下次从最后一条的下一个时间点开始
-                    timeframe_ms = TIMEFRAME_SECONDS.get(timeframe, 86400) * 1000
-                    current_since = last_timestamp + timeframe_ms
-                    
-                    # logger.info(f"分页获取中: 已获取 {len(all_ohlcv)} 条, 继续从 {datetime.fromtimestamp(current_since/1000)}")
-                
-                ohlcv = all_ohlcv
+                    next_since = last_timestamp + timeframe_ms
+                    if next_since <= current_since:
+                        break
+                    current_since = next_since
+
+                # 按开盘时间去重并排序，防止分页重叠
+                by_ts = {int(row[0]): row for row in all_ohlcv if row and len(row) >= 6}
+                ohlcv = sorted(by_ts.values(), key=lambda r: r[0])
             else:
                 ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, limit=limit)
             
@@ -357,7 +385,9 @@ class CryptoDataSource(BaseDataSource):
             
         except Exception as e:
             logger.warning(f"CCXT fetch_ohlcv failed: {str(e)}; trying fallback")
-            return self._fetch_ohlcv_fallback(symbol_pair, ccxt_timeframe, limit, before_time, timeframe)
+            return self._fetch_ohlcv_fallback(
+                symbol_pair, ccxt_timeframe, limit, before_time, timeframe, after_time
+            )
     
     def _fetch_ohlcv_fallback(
         self,
@@ -365,16 +395,26 @@ class CryptoDataSource(BaseDataSource):
         ccxt_timeframe: str,
         limit: int,
         before_time: Optional[int],
-        timeframe: str
+        timeframe: str,
+        after_time: Optional[int] = None,
     ) -> List:
         """备用获取方法"""
         try:
             total_seconds = self.calculate_time_range(timeframe, limit)
             
             if before_time:
-                end_time = datetime.fromtimestamp(before_time)
-                start_time = end_time - timedelta(seconds=total_seconds)
-                since = int(start_time.timestamp() * 1000)
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                safe_before_ts = min(int(before_time), now_ts)
+                end_dt = datetime.fromtimestamp(safe_before_ts, tz=timezone.utc)
+                start_dt = end_dt - timedelta(seconds=total_seconds)
+                if after_time is not None:
+                    floor_dt = datetime.fromtimestamp(int(after_time), tz=timezone.utc)
+                    start_dt = min(start_dt, floor_dt)
+                tf_ms = TIMEFRAME_SECONDS.get(timeframe, 86400) * 1000
+                now_ms = now_ts * 1000
+                since = int(start_dt.timestamp() * 1000)
+                if since >= now_ms:
+                    since = max(0, now_ms - tf_ms)
             else:
                 since = int((datetime.now() - timedelta(seconds=total_seconds)).timestamp() * 1000)
             

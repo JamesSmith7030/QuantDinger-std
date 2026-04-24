@@ -219,7 +219,8 @@ class FuturesDataSource(BaseDataSource):
         symbol: str,
         timeframe: str,
         limit: int,
-        before_time: Optional[int] = None
+        before_time: Optional[int] = None,
+        after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         获取期货K线数据
@@ -229,7 +230,9 @@ class FuturesDataSource(BaseDataSource):
             timeframe: 时间周期
             limit: 数据条数
             before_time: 结束时间戳
+            after_time: 预留与基类一致（当前期货链路未使用）
         """
+        _ = after_time
         # 判断是传统期货还是加密货币期货
         if symbol in self.YF_SYMBOLS or symbol.endswith('=F'):
             return self._get_traditional_futures(symbol, timeframe, limit, before_time)

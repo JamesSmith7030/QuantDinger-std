@@ -56,6 +56,7 @@ class HKStockDataSource(BaseDataSource):
         timeframe: str,
         limit: int,
         before_time: Optional[int] = None,
+        after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         code = normalize_hk_code(symbol)
         tf = normalize_chart_timeframe(timeframe)
@@ -66,7 +67,13 @@ class HKStockDataSource(BaseDataSource):
             is_hk=True, tencent_code=code, timeframe=tf, limit=lim, before_time=before_time
         )
         if rows:
-            return self.filter_and_limit(rows, limit=lim, before_time=before_time)
+            return self.filter_and_limit(
+                rows,
+                limit=lim,
+                before_time=before_time,
+                after_time=after_time,
+                truncate=(after_time is None),
+            )
 
         # Tier 2: Tencent for daily/weekly (fast, free)
         if tf in ("1D", "1W"):
@@ -75,14 +82,26 @@ class HKStockDataSource(BaseDataSource):
             raw_rows = fetch_kline(code, period=period, count=lim, adj="qfq")
             out = tencent_kline_rows_to_dicts(raw_rows)
             if out:
-                return self.filter_and_limit(out, limit=lim, before_time=before_time)
+                return self.filter_and_limit(
+                    out,
+                    limit=lim,
+                    before_time=before_time,
+                    after_time=after_time,
+                    truncate=(after_time is None),
+                )
 
         # Tier 3: yfinance (works when Yahoo not rate-limited)
         rows = fetch_yfinance_klines(
             is_hk=True, tencent_code=code, timeframe=tf, limit=lim, before_time=before_time
         )
         if rows:
-            return self.filter_and_limit(rows, limit=lim, before_time=before_time)
+            return self.filter_and_limit(
+                rows,
+                limit=lim,
+                before_time=before_time,
+                after_time=after_time,
+                truncate=(after_time is None),
+            )
 
         # Tier 4: AkShare (fragile overseas, last resort)
         if tf in ("1m", "5m", "15m", "30m", "1H", "4H"):
@@ -96,4 +115,10 @@ class HKStockDataSource(BaseDataSource):
         else:
             rows = []
 
-        return self.filter_and_limit(rows, limit=lim, before_time=before_time)
+        return self.filter_and_limit(
+            rows,
+            limit=lim,
+            before_time=before_time,
+            after_time=after_time,
+            truncate=(after_time is None),
+        )

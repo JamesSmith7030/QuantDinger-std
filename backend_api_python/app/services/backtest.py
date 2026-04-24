@@ -658,6 +658,7 @@ class BacktestService:
                 mtf_requested=True,
                 mtf_active=True,
             )
+            self._attach_actual_range_to_result(result, df_signal)
             logger.info("Backtest result formatted successfully")
         except Exception as e:
             logger.error(f"Failed to format result: {str(e)}")
@@ -1581,6 +1582,7 @@ class BacktestService:
             simulation_mode='standard',
             signal_timeframe=timeframe,
         )
+        self._attach_actual_range_to_result(result, df)
         return result
     
     def run_code_strategy(
@@ -1704,7 +1706,20 @@ class BacktestService:
             simulation_mode='standard',
             signal_timeframe=timeframe,
         )
+        self._attach_actual_range_to_result(result, df)
         return result
+    
+    @staticmethod
+    def _attach_actual_range_to_result(result: Dict[str, Any], df: pd.DataFrame) -> None:
+        """因上游 K 线不足而缩短区间时，写入 executionAssumptions（供前端展示，非错误）。"""
+        attrs = getattr(df, "attrs", None) or {}
+        ar = attrs.get("backtestActualRange")
+        if not ar:
+            return
+        ea = dict(result.get("executionAssumptions") or {})
+        ea["actualDataRange"] = ar
+        ea["requestedRangeAdjusted"] = True
+        result["executionAssumptions"] = ea
     
     def _fetch_kline_data(
         self,
@@ -1715,11 +1730,15 @@ class BacktestService:
         end_date: datetime
     ) -> pd.DataFrame:
         """Fetch candle data and convert to DataFrame (with in-memory caching)"""
-        # Calculate required candle count
+        # Calculate required candle count (+ slack for 2y-class windows & upstream gaps)
         total_seconds = (end_date - start_date).total_seconds()
         tf_seconds = self.TIMEFRAME_SECONDS.get(timeframe, 86400)
-        limit = math.ceil(total_seconds / tf_seconds) + 200
-        
+        raw_bars = max(1, math.ceil(total_seconds / tf_seconds))
+        limit = int(math.ceil(raw_bars * 1.15) + 200)
+
+        # Earliest candle we need (backtest may span up to ~2y; align fetch window to real start)
+        after_time = int((start_date - timedelta(days=1)).timestamp())
+
         # Calculate before_time (end date + 1 day)
         before_time = int((end_date + timedelta(days=1)).timestamp())
 
@@ -1735,7 +1754,8 @@ class BacktestService:
             symbol=symbol,
             timeframe=timeframe,
             limit=limit,
-            before_time=before_time
+            before_time=before_time,
+            after_time=after_time,
         )
         
         if not kline_data:
@@ -1777,34 +1797,47 @@ class BacktestService:
             data_start = df.index.min()
             data_end = df.index.max()
             logger.info(f"Kline data range: {data_start} to {data_end}, requested range: {start_date} to {end_date}")
-            
-            # Check if requested range is within available data
-            if data_start > start_date:
-                logger.warning(f"Requested start date {start_date} is before available data start {data_start}. "
-                             f"Using available start date instead.")
-            if data_end < end_date:
-                logger.warning(f"Requested end date {end_date} is after available data end {data_end}. "
-                             f"Using available end date instead. This may affect backtest results.")
-            
-            # Filter date range strictly by requested [start_date, end_date].
-            # Even when data_end < end_date (common when end_date is "today" and the last
-            # candle is still forming), we MUST filter by start_date — otherwise two runs
-            # with different start_dates but the same end_date could fall back to the
-            # same "tail N candles" slice whenever the upstream fetch happened to return
-            # an identical-sized window (rate limits / pagination caps / tiny history).
-            effective_start = max(start_date, data_start)
-            effective_end = min(end_date, data_end)
-            if effective_start > effective_end:
-                # Requested window sits entirely before or after available data
-                logger.error(
-                    f"Requested range [{start_date} ~ {end_date}] does not overlap "
-                    f"with available data [{data_start} ~ {data_end}] for "
-                    f"{market}:{symbol} {timeframe}. Backtest will return empty data."
-                )
-                return pd.DataFrame()
 
-            df_filtered = df[(df.index >= effective_start) & (df.index <= effective_end)].copy()
-            used_fallback = False
+            if data_start > start_date or data_end < end_date:
+                logger.debug(
+                    "Backtest requested window wider than upstream: "
+                    f"requested=[{start_date} ~ {end_date}], upstream=[{data_start} ~ {data_end}]"
+                )
+
+            # 首选：请求区间与可用数据的交集（例如不满2年时自动从首根可用K开始）
+            rs = pd.Timestamp(start_date)
+            re = pd.Timestamp(end_date)
+            effective_start = max(rs, pd.Timestamp(data_start))
+            effective_end = min(re, pd.Timestamp(data_end))
+            window_adjusted = False
+
+            if effective_start <= effective_end:
+                df_filtered = df[(df.index >= effective_start) & (df.index <= effective_end)].copy()
+            else:
+                # 无交集：从第一根可用 K 回测到「用户结束日」与「数据末」的较早者，不视为错误
+                alt_start = pd.Timestamp(data_start)
+                alt_end = min(re, pd.Timestamp(data_end))
+                if alt_start <= alt_end:
+                    df_filtered = df[(df.index >= alt_start) & (df.index <= alt_end)].copy()
+                    effective_start, effective_end = alt_start, alt_end
+                    window_adjusted = True
+                    logger.info(
+                        f"[Backtest] 可用K线未覆盖所选起点，已从首根可用K线开始回测 "
+                        f"{market}:{symbol} {timeframe} effective=[{effective_start} ~ {effective_end}]"
+                    )
+                elif len(df) > 0:
+                    df_filtered = df.copy()
+                    effective_start = df_filtered.index.min()
+                    effective_end = df_filtered.index.max()
+                    window_adjusted = True
+                    logger.info(
+                        f"[Backtest] 所选区间与可用数据无重叠，使用全部可用K线 "
+                        f"{market}:{symbol} {timeframe} [{effective_start} ~ {effective_end}]"
+                    )
+                else:
+                    return pd.DataFrame()
+
+            used_fallback = window_adjusted
 
             # Diagnostics: did we actually cover a meaningful portion of the requested range?
             requested_seconds = max(1.0, (end_date - start_date).total_seconds())
@@ -1814,28 +1847,31 @@ class BacktestService:
             coverage_ratio = covered_seconds / requested_seconds if requested_seconds > 0 else 0.0
 
             if df_filtered.empty:
-                # Last-resort fallback: take the most recent N candles. This should be rare
-                # and is explicitly flagged so the user can see that their requested window
-                # was not honored verbatim.
+                # Last-resort：取最近 N 根（上游时间戳异常等），仅记 debug，不对用户报错
                 requested_candles = max(1, math.ceil(requested_seconds / tf_seconds))
                 if len(df) > 0:
                     df_filtered = df.tail(min(len(df), requested_candles)).copy()
                     effective_start = df_filtered.index.min()
                     effective_end = df_filtered.index.max()
                     used_fallback = True
-                    logger.warning(
-                        f"[Backtest] No candles in requested range [{start_date} ~ {end_date}] "
-                        f"for {market}:{symbol} {timeframe}. Falling back to latest "
-                        f"{len(df_filtered)} candles ({effective_start} ~ {effective_end}). "
-                        f"This almost certainly means upstream data does not cover your date range."
+                    logger.debug(
+                        f"[Backtest] 过滤后为空，已回退为最近 {len(df_filtered)} 根K线 "
+                        f"{market}:{symbol} {timeframe} ({effective_start} ~ {effective_end})"
                     )
                 else:
-                    logger.error(
-                        f"[Backtest] After filtering {market}:{symbol} {timeframe} to "
-                        f"{effective_start}~{effective_end}, no candles remain. "
-                        f"Upstream range was {data_start}~{data_end}."
+                    logger.debug(
+                        f"[Backtest] 过滤后无K线 {market}:{symbol} {timeframe} "
+                        f"upstream={data_start}~{data_end}"
                     )
                     return pd.DataFrame()
+
+            if pd.Timestamp(data_start) > rs or window_adjusted:
+                df_filtered.attrs["backtestActualRange"] = {
+                    "requestedStart": str(rs),
+                    "requestedEnd": str(re),
+                    "actualStart": str(effective_start),
+                    "actualEnd": str(effective_end),
+                }
 
             logger.info(
                 f"[Backtest] {market}:{symbol} {timeframe} | "

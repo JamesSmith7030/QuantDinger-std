@@ -16,6 +16,15 @@ from app.config import TiingoConfig, APIKeys
 
 logger = get_logger(__name__)
 
+
+def normalize_forex_pair_symbol(symbol: str) -> str:
+    """EUR/USD、XAU/USD、XAU-USD -> EURUSD、XAUUSD，供 Tiingo SYMBOL_MAP 与内部缓存键一致。"""
+    if not symbol:
+        return symbol
+    s = str(symbol).strip().upper().replace(" ", "").replace("-", "")
+    return s.replace("/", "")
+
+
 # 全局缓存
 _forex_cache: Dict[str, Dict[str, Any]] = {}
 _forex_cache_lock = threading.Lock()
@@ -122,6 +131,7 @@ class ForexDataSource(BaseDataSource):
         获取外汇实时报价
         Priority: Twelve Data → Tiingo → yfinance
         """
+        symbol = normalize_forex_pair_symbol(symbol)
         cache_key = f"ticker_{symbol}"
         with _forex_cache_lock:
             cached = _forex_cache.get(cache_key)
@@ -178,6 +188,7 @@ class ForexDataSource(BaseDataSource):
         if not api_key:
             return None
 
+        cache_key = f"ticker_{symbol}"
         try:
             # 解析 symbol
             tiingo_symbol = self.SYMBOL_MAP.get(symbol)
@@ -305,12 +316,14 @@ class ForexDataSource(BaseDataSource):
         symbol: str,
         timeframe: str,
         limit: int,
-        before_time: Optional[int] = None
+        before_time: Optional[int] = None,
+        after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         获取外汇K线数据
         Priority: Twelve Data → Tiingo → yfinance
         """
+        symbol = normalize_forex_pair_symbol(symbol)
         for fetcher in (
             self._get_kline_twelvedata,
             self._get_kline_tiingo,
@@ -319,7 +332,13 @@ class ForexDataSource(BaseDataSource):
             try:
                 bars = fetcher(symbol, timeframe, limit, before_time)
                 if bars:
-                    return bars
+                    return self.filter_and_limit(
+                        bars,
+                        limit,
+                        before_time,
+                        after_time=after_time,
+                        truncate=(after_time is None),
+                    )
             except Exception as e:
                 logger.debug("Forex kline fetcher %s failed for %s: %s", fetcher.__name__, symbol, e)
         return []

@@ -172,7 +172,8 @@ class USStockDataSource(BaseDataSource):
         symbol: str,
         timeframe: str,
         limit: int,
-        before_time: Optional[int] = None
+        before_time: Optional[int] = None,
+        after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """获取美股K线数据"""
         klines = []
@@ -189,6 +190,9 @@ class USStockDataSource(BaseDataSource):
             else:
                 end_date = datetime.now()
                 start_date = end_date - timedelta(days=days)
+            if after_time is not None:
+                floor = datetime.fromtimestamp(after_time)
+                start_date = min(start_date, floor)
             
             # logger.info(f"使用 yfinance 获取 {symbol}, 周期: {interval}, 日期: {start_date.date()} ~ {end_date.date()}")
             
@@ -200,12 +204,24 @@ class USStockDataSource(BaseDataSource):
                 if self.finnhub_client and timeframe == '1D':
                     klines = self._fetch_finnhub(symbol, start_date, end_date, limit)
                     if klines:
-                        return klines
+                        return self.filter_and_limit(
+                            klines,
+                            limit,
+                            before_time,
+                            after_time,
+                            truncate=(after_time is None),
+                        )
             else:
                 klines = self._convert_dataframe(df, limit)
             
             # 过滤和限制
-            klines = self.filter_and_limit(klines, limit, before_time)
+            klines = self.filter_and_limit(
+                klines,
+                limit,
+                before_time,
+                after_time,
+                truncate=(after_time is None),
+            )
             
             # 记录结果
             self.log_result(symbol, klines, timeframe)
