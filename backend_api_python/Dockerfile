@@ -3,17 +3,27 @@
 ARG BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${BASE_IMAGE}
 
+# Optional mainland mirrors (set via docker-compose build args from project-root .env)
+ARG USE_CN_MIRROR=0
+ARG PIP_INDEX_URL=
+
 # Set working directory
 WORKDIR /app
 
-# Use HTTPS mirror and install minimal runtime dependencies.
-# Keep image lean to avoid long downloads of full compiler toolchains.
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends --fix-missing \
+# Debian apt: optional Aliyun mirror, else bump deb.debian.org to HTTPS.
+# Keeps image lean: only minimal build deps, then purge after pip.
+RUN set -eux; \
+    if [ "$USE_CN_MIRROR" = "1" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i -E \
+        's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/debian.sources; \
+    else \
+      sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --fix-missing \
     ca-certificates \
     curl \
-    # Build deps (needed for some pyproject-based packages like ed25519-blake2b)
     build-essential \
     python3-dev \
     libffi-dev \
@@ -23,8 +33,12 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
 # Copy dependency file
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --prefer-binary --timeout 120 -r requirements.txt \
+# Install Python dependencies (optional PyPI mirror via PIP_INDEX_URL)
+RUN if [ -n "$PIP_INDEX_URL" ]; then \
+      pip install --no-cache-dir --prefer-binary --timeout 180 -i "$PIP_INDEX_URL" -r requirements.txt; \
+    else \
+      pip install --no-cache-dir --prefer-binary --timeout 180 -r requirements.txt; \
+    fi \
     # Remove build deps to keep image small
     && apt-get purge -y --auto-remove build-essential python3-dev libffi-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*

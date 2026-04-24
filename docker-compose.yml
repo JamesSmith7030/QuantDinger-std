@@ -19,6 +19,12 @@
 #   To switch source globally, set a single `IMAGE_PREFIX` in project-root `.env`.
 #   Examples: empty (official), `docker.m.daocloud.io/library/`,
 #   `docker.xuanyuan.me/library/`.
+#
+# Mainland build acceleration (project-root `.env`):
+#   USE_CN_MIRROR=1     — backend image: Debian apt → Aliyun mirror (faster apt-get).
+#   PIP_INDEX_URL=...   — backend image: pip -i mirror (e.g. Tsinghua, see .env.example).
+#   Also configure Docker Desktop "registry-mirrors" so pulls of python/postgres/nginx
+#   images are fast without VPN (separate from this file).
 
 services:
   # ========================
@@ -82,6 +88,8 @@ services:
       dockerfile: Dockerfile
       args:
         BASE_IMAGE: ${IMAGE_PREFIX:-}python:3.12-slim-bookworm
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-0}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     container_name: quantdinger-backend
     restart: unless-stopped
     depends_on:
