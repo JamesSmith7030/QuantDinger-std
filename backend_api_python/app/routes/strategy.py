@@ -1064,16 +1064,17 @@ def start_strategy():
             }), 400
         get_strategy_service().update_strategy_status(strategy_id, 'running', user_id=user_id)
 
-        success = get_trading_executor().start_strategy(strategy_id)
-        
+        executor = get_trading_executor()
+        success = executor.start_strategy(strategy_id)
+
         if not success:
             # If start failed, restore status
             get_strategy_service().update_strategy_status(strategy_id, 'stopped', user_id=user_id)
-            return jsonify({
-                'code': 0,
-                'msg': 'Failed to start strategy executor',
-                'data': None
-            }), 500
+            detail = getattr(executor, "_last_start_failure", "") or ""
+            msg = "Failed to start strategy executor"
+            if detail:
+                msg = f"{msg}: {detail}"
+            return jsonify({'code': 0, 'msg': msg, 'data': {'detail': detail} if detail else None}), 500
         
         return jsonify({
             'code': 1,
@@ -1122,6 +1123,12 @@ def test_connection():
             logger.error(f"Invalid exchange_config type: {type(exchange_config)}, data: {str(exchange_config)[:200]}")
             # Frontend expects HTTP 200 with {code:0} for business failures.
             return jsonify({'code': 0, 'msg': 'Invalid exchange config format; please check your payload', 'data': None})
+
+        # Demo/testnet toggles and base_url are often sent on the JSON root while keys live under exchange_config.
+        if isinstance(data, dict) and "exchange_config" in data:
+            from app.services.live_trading.factory import merge_root_exchange_config_overlay
+
+            exchange_config = merge_root_exchange_config_overlay(root=data, exchange_config=exchange_config)
 
         # Resolve credential_id → full config (merges credential keys with any overrides).
         # This allows the frontend to send just {credential_id: 5} without raw api_key/secret_key.

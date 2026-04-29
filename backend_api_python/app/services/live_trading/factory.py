@@ -49,11 +49,77 @@ def _get(cfg: Dict[str, Any], *keys: str) -> str:
     return ""
 
 
+# Merged from HTTP JSON root into nested `exchange_config` for /strategies/test-connection
+# when the UI sends demo/testnet toggles next to the nested object.
+EXCHANGE_CONFIG_ROOT_OVERLAY_KEYS = (
+    "enable_demo_trading",
+    "enableDemoTrading",
+    "simulated_trading",
+    "simulatedTrading",
+    "use_testnet",
+    "is_testnet",
+    "isTestnet",
+    "sandbox",
+    "paper_trading",
+    "paperTrading",
+    "network",
+    "environment",
+    "env",
+    "base_url",
+    "baseUrl",
+    "futures_base_url",
+    "futuresBaseUrl",
+)
+
+
+def merge_root_exchange_config_overlay(*, root: Dict[str, Any], exchange_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Overlay selected keys from the request root onto exchange_config (copying the latter)."""
+    out = dict(exchange_config or {})
+    if not isinstance(root, dict):
+        return out
+    for k in EXCHANGE_CONFIG_ROOT_OVERLAY_KEYS:
+        if k in root:
+            out[k] = root[k]
+    return out
+
+
+def exchange_demo_mode_enabled(cfg: Dict[str, Any]) -> bool:
+    """
+    Whether config indicates demo / testnet / simulated / paper mode for live-trading clients.
+
+    Accepts common frontend / exchange naming variants so test-connection matches create_client.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    env = str(cfg.get("network") or cfg.get("environment") or cfg.get("env") or "").strip().lower()
+    if env in ("testnet", "sandbox", "demo", "paper", "simulate", "simulation"):
+        return True
+    for k in (
+        "enable_demo_trading",
+        "enableDemoTrading",
+        "simulated_trading",
+        "simulatedTrading",
+        "use_testnet",
+        "is_testnet",
+        "isTestnet",
+        "sandbox",
+        "paper_trading",
+        "paperTrading",
+    ):
+        v = cfg.get(k)
+        if v is None:
+            continue
+        if isinstance(v, bool) and v:
+            return True
+        if isinstance(v, (int, float)) and int(v) == 1:
+            return True
+        if isinstance(v, str) and str(v).strip().lower() in ("true", "1", "yes", "on"):
+            return True
+    return False
+
+
 def _demo_enabled(cfg: Dict[str, Any]) -> bool:
-    v = cfg.get("enable_demo_trading") or cfg.get("enableDemoTrading")
-    if isinstance(v, bool):
-        return v
-    return str(v or "").strip().lower() in ("true", "1", "yes")
+    return exchange_demo_mode_enabled(cfg)
 
 
 def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap") -> BaseRestClient:

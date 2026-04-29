@@ -14,6 +14,7 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.auth import login_required
 from app.utils.credential_crypto import encrypt_credential_blob, decrypt_credential_blob
+from app.services.live_trading.factory import exchange_demo_mode_enabled
 
 logger = get_logger(__name__)
 
@@ -79,7 +80,7 @@ def list_credentials():
             try:
                 plain = decrypt_credential_blob(item.get('encrypted_config'))
                 cfg = json.loads(plain) if plain else {}
-                item['enable_demo_trading'] = bool(cfg.get('enable_demo_trading') or cfg.get('enableDemoTrading'))
+                item['enable_demo_trading'] = exchange_demo_mode_enabled(cfg if isinstance(cfg, dict) else {})
             except Exception:
                 item['enable_demo_trading'] = False
             item.pop('encrypted_config', None)
@@ -192,7 +193,7 @@ def create_credential():
                 'api_key': api_key,
                 'secret_key': secret_key,
                 'passphrase': (data.get('passphrase') or '').strip(),
-                'enable_demo_trading': bool(data.get('enable_demo_trading', False))
+                'enable_demo_trading': exchange_demo_mode_enabled(data),
             })
             hint = _api_key_hint(api_key)
         else:

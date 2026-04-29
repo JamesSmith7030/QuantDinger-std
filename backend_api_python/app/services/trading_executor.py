@@ -58,6 +58,8 @@ class TradingExecutor:
         
         # 单实例线程上限，避免无限制创建线程导致 can't start new thread/OOM
         self.max_threads = int(os.getenv('STRATEGY_MAX_THREADS', '64'))
+        # 最近一次 start_strategy(False) 的原因（供 API 返回给用户）
+        self._last_start_failure: str = ""
 
         # Per-strategy exchange fee-rate cache: {strategy_id: {"maker": float, "taker": float}}
         self._exchange_fee_cache: Dict[int, Optional[Dict[str, float]]] = {}
@@ -402,12 +404,18 @@ class TradingExecutor:
         """
         try:
             with self.lock:
+                self._last_start_failure = ""
                 # 清理已退出的线程，防止计数膨胀
                 stale_ids = [sid for sid, th in self.running_strategies.items() if not th.is_alive()]
                 for sid in stale_ids:
                     del self.running_strategies[sid]
 
                 if len(self.running_strategies) >= self.max_threads:
+                    n = len(self.running_strategies)
+                    self._last_start_failure = (
+                        f"已达到单进程策略线程上限 {self.max_threads}（当前已登记 {n} 个）；"
+                        f"请停止部分运行中策略，或提高环境变量 STRATEGY_MAX_THREADS 后重启 API。"
+                    )
                     logger.error(
                         f"Thread limit reached ({self.max_threads}); refuse to start strategy {strategy_id}. "
                         f"Reduce running strategies or increase STRATEGY_MAX_THREADS."
@@ -416,6 +424,7 @@ class TradingExecutor:
                     return False
 
                 if strategy_id in self.running_strategies:
+                    self._last_start_failure = "该策略的执行线程已在运行中"
                     logger.warning(f"Strategy {strategy_id} is already running")
                     return False
                 
@@ -428,6 +437,7 @@ class TradingExecutor:
                 try:
                     thread.start()
                 except Exception as e:
+                    self._last_start_failure = f"启动线程失败: {e}"
                     # 捕获 can't start new thread 等异常，记录资源状态
                     self._log_resource_status(prefix="启动异常")
                     raise e
@@ -439,6 +449,7 @@ class TradingExecutor:
                 return True
                 
         except Exception as e:
+            self._last_start_failure = self._last_start_failure or f"异常: {e}"
             logger.error(f"Failed to start strategy {strategy_id}: {str(e)}")
             logger.error(traceback.format_exc())
             return False

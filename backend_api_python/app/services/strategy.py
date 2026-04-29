@@ -301,7 +301,7 @@ class StrategyService:
         with StrategyService._connection_test_semaphore:
             try:
                 from app.services.exchange_execution import resolve_exchange_config, safe_exchange_config_for_log
-                from app.services.live_trading.factory import create_client
+                from app.services.live_trading.factory import create_client, exchange_demo_mode_enabled
                 from app.services.live_trading.binance import BinanceFuturesClient
                 from app.services.live_trading.binance_spot import BinanceSpotClient
                 from app.services.live_trading.okx import OkxClient
@@ -519,7 +519,7 @@ class StrategyService:
                                 alt_ok = False
 
                             base_url = getattr(client, "base_url", "") or ""
-                            is_demo = str(resolved.get("enable_demo_trading") or resolved.get("enableDemoTrading") or "").strip().lower() in ("true", "1", "yes")
+                            is_demo = exchange_demo_mode_enabled(resolved)
                             hint = (
                                 f"Binance auth failed (-2015). Verify: "
                                 f"(1) IP whitelist includes this server egress IP={egress_ip or 'unknown'}, "
