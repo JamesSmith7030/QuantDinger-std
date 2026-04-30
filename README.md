@@ -14,6 +14,7 @@
     <a href="https://ai.quantdinger.com"><strong>Live Demo</strong></a> &nbsp;·&nbsp;
     <a href="https://www.youtube.com/watch?v=tNAZ9uMiUUw"><strong>Video Demo</strong></a> &nbsp;·&nbsp;
     <a href="https://www.quantdinger.com"><strong>Website</strong></a> &nbsp;·&nbsp;
+    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><strong>AWS Marketplace</strong></a> <em>(AMI, one-click cloud)</em> &nbsp;·&nbsp;
     <a href="https://t.me/quantdinger"><strong>Telegram</strong></a> &nbsp;·&nbsp;
     <a href="https://discord.com/invite/tyx5B6TChr"><strong>Discord</strong></a> &nbsp;·&nbsp;
     <a href="https://youtube.com/@quantdinger"><strong>YouTube</strong></a>
@@ -24,6 +25,7 @@
     <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20image%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><img src="https://img.shields.io/badge/AWS%20Marketplace-QuantDinger%20AMI%20%28CentOS%209%29-232F3E?style=flat-square&logo=amazonaws&logoColor=white" alt="Deploy QuantDinger from AWS Marketplace (ThinkCloud AMI)"></a>
     <img src="https://img.shields.io/badge/Frontend-Prebuilt-1f8b4c?style=flat-square" alt="Frontend">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
     <a href="https://oosmetrics.com/repo/brokermr810/QuantDinger"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/4991ab54-52d2-46d4-a03a-67b47b61ae4b.svg" alt="oosmetrics — Top 7 in Training by acceleration (2026-04-25)"></a>
