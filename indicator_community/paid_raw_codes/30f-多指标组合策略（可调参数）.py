@@ -1,5 +1,5 @@
 # ============================================================
-# 多指标组合策略 (均线+RSI+MACD)
+# 30f-多指标组合策略 (均线+RSI+MACD)
 # Multi-Indicator Composite Strategy
 # ============================================================
 #
@@ -31,7 +31,7 @@ use_volume = params.get('use_volume', False)
 volume_mult = params.get('volume_mult', 1.5)
 
 # === 指标信息 ===
-my_indicator_name = "多指标组合策略（可调参数）"
+my_indicator_name = "30f-多指标组合策略（可调参数）"
 my_indicator_description = f"SMA{sma_short_period}/{sma_long_period} + RSI{rsi_period}"
 
 df = df.copy()

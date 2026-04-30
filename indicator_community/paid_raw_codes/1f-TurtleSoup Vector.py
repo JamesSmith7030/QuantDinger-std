@@ -1,6 +1,6 @@
 import numpy as np
 
-my_indicator_name = "TurtleSoup Vector"
+my_indicator_name = "1f-TurtleSoup Vector"
 my_indicator_description = "流动性猎杀：捕捉 2.5 STD 极值扫掠与收线拒绝，免疫次根K线滑点"
 
 # ─── 1. 数学统计算法参数 ───

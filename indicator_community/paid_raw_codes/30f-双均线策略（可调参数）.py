@@ -1,5 +1,5 @@
 # ============================================================
-# 双均线策略 (支持外部参数配置)
+# 30f-双均线策略 (支持外部参数配置)
 # Dual Moving Average Strategy with External Parameters
 # ============================================================
 #
@@ -20,7 +20,7 @@ sma_short_period = params.get('sma_short', 14)
 sma_long_period = params.get('sma_long', 28)
 
 # === 指标信息 ===
-my_indicator_name = "双均线策略（可调参数）"
+my_indicator_name = "30f-双均线策略（可调参数）"
 my_indicator_description = f"短期{sma_short_period}/长期{sma_long_period}均线交叉策略"
 
 # === 计算均线 ===

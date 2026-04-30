@@ -1,4 +1,4 @@
-my_indicator_name = "SOLUSDT高波动布林带触及调参优化版"
+my_indicator_name = "1f-SOLUSDT高波动布林带触及调参优化版"
 my_indicator_description = "简单布林带反转思路示例；实盘请结合趋势过滤与风控。"
 
 # @strategy stopLossPct 0

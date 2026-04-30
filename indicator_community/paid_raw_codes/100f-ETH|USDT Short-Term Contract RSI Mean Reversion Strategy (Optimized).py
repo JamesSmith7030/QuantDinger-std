@@ -1,5 +1,5 @@
 # ------------- 适配ETH/USDT短线合约：修改策略基础信息 -------------
-my_indicator_name = "ETH/USDT Short-Term Contract RSI Mean Reversion Strategy (Optimized)"
+my_indicator_name = "100f-ETH/USDT Short-Term Contract RSI Mean Reversion Strategy (Optimized)"
 my_indicator_description = "ETH/USDT合约短线：RSI(9) < 30买入，RSI(9) > 70卖出，增加成交量确认和波动率过滤，适配合约高波动特性。"
 
 # 检查df是否为空

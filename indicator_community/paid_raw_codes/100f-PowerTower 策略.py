@@ -1,5 +1,5 @@
 # Existing code was provided as context.
-my_indicator_name = "PowerTower 策略"
+my_indicator_name = "100f-PowerTower 策略"
 my_indicator_description = "### PowerTower 策略  **策略原理**： - 识别价格指数级上涨形态 - 连续3根K线满足幂次增长时触发买入信号 - 连续2根K线满足幂次下跌时触发卖出信号  **公式**： ``` 买入条件: 当前价 > 2根前K线收盘价 × (1 + BUY_POW/100) 且 1根前 > 3根前 × (1 + BUY_POW/100) 且 2根前 > 4根前 × (1 + BUY_POW/"
 
 # @param rsi_len int 14 RSI period
