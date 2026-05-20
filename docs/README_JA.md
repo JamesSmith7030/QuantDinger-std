@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/v/release/brokermr810/QuantDinger?style=flat-square&color=orange&label=Version" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger は **セルフホスト・ローカルファースト** のクオンツ基盤です。**AI 支援リサーチ**、**Python ネイティブ戦略**、**バックテスト**、**ライブ取引**（暗号資産、IBKR 米株、MT5 FX）を **1 つの製品** にまとめます。
+> QuantDinger は **セルフホスト・ローカルファースト** のクオンツ基盤です。**AI 支援リサーチ**、**Python ネイティブ戦略**、**バックテスト**、**ライブ取引**（暗号資産、IBKR 米株、MT5 FX、Alpaca 米株 / ETF / 暗号資産）を **1 つの製品** にまとめます。
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="QuantDinger アーキテクチャ" width="960">
@@ -70,7 +70,7 @@
 
 ## クイックスタート
 
-**前提:** [Docker](https://docs.docker.com/get-docker/) + Compose、**Git**。**Node.js は不要**（`frontend/dist` にビルド済み UI 同梱）。
+**前提:** [Docker](https://docs.docker.com/get-docker/) + Compose、**Git**。**Node.js は不要**（フロントエンドのイメージは GHCR から取得）。
 
 ### macOS / Linux
 
@@ -108,13 +108,14 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 | リポジトリ | 内容 |
 |------------|------|
 | **[QuantDinger](https://github.com/brokermr810/QuantDinger)**（本倉庫） | バックエンド、Compose、ドキュメント、プリビルド Web |
-| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **Web フロントソース**（Vue）— `npm run build` で `frontend/dist` を差し替え |
+| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **Web フロントソース**（Vue）— `v*` タグで `ghcr.io/brokermr810/quantdinger-frontend` を自動発行 |
 | **[QuantDinger-Mobile](https://github.com/brokermr810/QuantDinger-Mobile)** | **モバイルクライアント**（オープンソース） |
 
 <h2 id="mcp--agent-ゲートウェイ">MCP / Agent ゲートウェイ</h2>
 
 **Cursor / Claude Code / Codex** など向けに **Model Context Protocol（MCP）** と **Agent Gateway**（`/api/agent/v1`）を提供。詳細は英語ドキュメントが一次情報です：
 
+- **接続レシピ:** [**MCP_SETUP.md**](agent/MCP_SETUP.md) — ホスト版 / セルフホスト、ローカル stdio、リモート HTTP、Claude Code CLI、すべてここに集約。
 - [AGENT_QUICKSTART.md](agent/AGENT_QUICKSTART.md) · [AI_INTEGRATION_DESIGN.md](agent/AI_INTEGRATION_DESIGN.md) · [agent-openapi.json](agent/agent-openapi.json)
 - MCP サーバー: [`../mcp_server/README.md`](../mcp_server/README.md) · PyPI [`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)
 
@@ -122,7 +123,7 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 
 ## 製品概要
 
-セルフホスト可能な **AI + Python 戦略 + バックテスト + ライブ** の一体環境。認証情報は **PostgreSQL** と **`.env`** で管理。暗号取引所、IBKR、MT5、LLM は環境変数で接続。
+セルフホスト可能な **AI + Python 戦略 + バックテスト + ライブ** の一体環境。認証情報は **PostgreSQL** と **`.env`** で管理。暗号取引所、IBKR、MT5、Alpaca、LLM は環境変数で接続。
 
 ## ビジュアルツアー
 
@@ -147,10 +148,10 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 
 ## 機能ハイライト
 
-- **リサーチ & AI** — マルチ LLM 分析、ウォッチリスト、履歴；NL→コード；Polymarket 研究フロー；**Agent / MCP** 連携。
+- **リサーチ & AI** — マルチ LLM 分析、ウォッチリスト、履歴；NL→コード；**Agent / MCP** 連携。
 - **構築** — `IndicatorStrategy` と `ScriptStrategy`（`on_bar`）；プロ向け K 線 UI。
 - **検証** — サーバサイドバックテスト、エクイティカーブ。
-- **運用** — 暗号執行、クイックトレード、IBKR / MT5；Telegram、メール、Discord、Webhook 等。
+- **運用** — 暗号執行、クイックトレード、IBKR / MT5 / Alpaca（米株・ETF・暗号資産）；Telegram、メール、Discord、Webhook 等。
 - **プラットフォーム** — Docker Compose、Postgres、Redis、OAuth、マルチユーザー、クレジット / メンバーシップ / USDT 課金スイッチ。
 
 ## アーキテクチャ
@@ -179,7 +180,7 @@ flowchart LR
     subgraph EXT[外部]
         LLM[LLM]
         EXCH[取引所]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -200,6 +201,14 @@ flowchart LR
 1. リポジトリをクローンし、`cp backend_api_python/env.example backend_api_python/.env`
 2. **`SECRET_KEY` を必ず設定**（プレースホルダのままではバックエンドが起動しません）。Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **代替（リポジトリ不要）**：プリビルド多架構（amd64/arm64）の backend + frontend を GHCR から直接プルする場合：
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     デフォルトイメージは `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`。両側を同時に固定するならローカル `.env` で `IMAGE_TAG=v3.0.9`、片側だけなら `BACKEND_TAG` / `FRONTEND_TAG` を設定。
+   - **フロントエンドのローカル開発**: `QuantDinger-Vue` を `./QuantDinger-Vue/` (gitignore 済) にクローンして `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`。詳細は[英語 README](../README.md#alternative-build-the-frontend-from-vue-source)。
 4. **Web:** `http://localhost:8888` · **API ヘルス:** `http://localhost:5000/api/health`
 5. 本番前にデフォルト管理者パスワードを変更。`backend_api_python/.env` の **`FRONTEND_URL`** を実際の URL に合わせる。
 
@@ -221,7 +230,7 @@ AI 機能には `env.example` の **AI / LLM** 節を `.env` に反映し、back
 
 **本当にセルフホストできる？** はい。Docker Compose で自分のインフラ上に展開します。
 
-**暗号だけ？** いいえ。IBKR（米株）、MT5（FX）、Polymarket 研究にも対応。
+**暗号だけ？** いいえ。IBKR・Alpaca（米株・ETF・暗号資産）、MT5（FX）にも対応。
 
 **Python で戦略を書ける？** はい。`IndicatorStrategy` と `ScriptStrategy` をサポート。
 

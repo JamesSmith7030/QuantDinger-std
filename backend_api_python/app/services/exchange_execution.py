@@ -36,6 +36,41 @@ def _safe_json_loads(value: Any, default: Any) -> Any:
         return default
 
 
+# Map exchange_id -> implied market_category, used as a safety net so we never
+# silently route stock/forex strategies through the crypto data source just
+# because `market_category` was missing from the row.
+#
+# Keep this list in sync with:
+#   - app/services/live_trading/factory.py::create_client
+#   - app/services/pending_order_worker.py::_execute_live_order validation
+#   - app/services/strategy.py validators (create / update / batch_create)
+_EXCHANGE_TO_MARKET: Dict[str, str] = {
+    "ibkr": "USStock",
+    "alpaca": "USStock",  # Alpaca primarily for US stocks; crypto is opt-in via market_category override
+    "mt5": "Forex",
+}
+_CRYPTO_EXCHANGES = {
+    "binance", "okx", "bitget", "bybit", "coinbaseexchange",
+    "kraken", "kucoin", "gate", "deepcoin", "htx",
+}
+
+
+def _infer_market_category_from_exchange(exchange_id: str) -> str:
+    """
+    Best-effort inference when market_category is missing on a strategy row.
+
+    Returns 'Crypto' as the legacy default only if exchange_id is empty or unknown.
+    """
+    eid = (exchange_id or "").strip().lower()
+    if not eid:
+        return "Crypto"
+    if eid in _EXCHANGE_TO_MARKET:
+        return _EXCHANGE_TO_MARKET[eid]
+    if eid in _CRYPTO_EXCHANGES:
+        return "Crypto"
+    return "Crypto"
+
+
 def mask_secret(s: str, keep: int = 4) -> str:
     """Return a masked representation of a secret for safe logs."""
     if not s:
@@ -77,7 +112,24 @@ def load_strategy_configs(strategy_id: int) -> Dict[str, Any]:
     market_type = (row.get("market_type") or exchange_config.get("market_type") or "swap").strip()
     leverage = float(row.get("leverage") or trading_config.get("leverage") or exchange_config.get("leverage") or 1.0)
     execution_mode = (row.get("execution_mode") or "signal").strip().lower()
-    market_category = (row.get("market_category") or "Crypto").strip()
+
+    # market_category MUST come from the strategy row; if it's empty (legacy or
+    # corrupt rows), infer from exchange_id rather than silently defaulting to
+    # Crypto — that is what historically caused TSLA to be queried via CCXT.
+    raw_mc = (row.get("market_category") or "").strip()
+    if raw_mc:
+        market_category = raw_mc
+    else:
+        ex_id = ""
+        if isinstance(exchange_config, dict):
+            ex_id = str(exchange_config.get("exchange_id") or exchange_config.get("exchangeId") or "").strip().lower()
+        market_category = _infer_market_category_from_exchange(ex_id)
+        logger.warning(
+            "Strategy %s has empty market_category — inferred '%s' from exchange_id=%r. "
+            "Please re-save the strategy with an explicit market_category to silence this warning.",
+            strategy_id, market_category, ex_id,
+        )
+
     user_id = int(row.get("user_id") or 1)
 
     return {

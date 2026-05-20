@@ -38,6 +38,10 @@ IBKRConfig = None
 MT5Client = None
 MT5Config = None
 
+# Lazy import Alpaca to avoid ImportError if alpaca-py not installed
+AlpacaClient = None
+AlpacaConfig = None
+
 
 def _get(cfg: Dict[str, Any], *keys: str) -> str:
     for k in keys:
@@ -106,6 +110,10 @@ def exchange_demo_mode_enabled(cfg: Dict[str, Any]) -> bool:
         "sandbox",
         "paper_trading",
         "paperTrading",
+        # Alpaca stores its paper/live flag as a bare `paper` boolean — alias it
+        # so /api/credentials/list shows the right paper badge on Alpaca rows.
+        "paper",
+        "is_paper",
     ):
         v = cfg.get(k)
         if v is None:
@@ -141,11 +149,13 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         spot_broker_id = _get(exchange_config, "spot_broker_id", "spotBrokerId", "broker_id", "brokerId") or "A2NAPZAC"
         futures_broker_id = _get(exchange_config, "futures_broker_id", "futuresBrokerId", "broker_id", "brokerId") or "HBpUbQjT"
         if mt == "spot":
-            default_url = "https://demo-api.binance.com" if is_demo else "https://api.binance.com"
+            # Binance Spot Testnet: https://testnet.binance.vision (official)
+            default_url = "https://testnet.binance.vision" if is_demo else "https://api.binance.com"
             base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
             return BinanceSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=spot_broker_id)
         # Default to USDT-M futures
-        default_url = "https://demo-fapi.binance.com" if is_demo else "https://fapi.binance.com"
+        # Binance Futures Testnet: https://testnet.binancefuture.com (official)
+        default_url = "https://testnet.binancefuture.com" if is_demo else "https://fapi.binance.com"
         base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
         return BinanceFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=futures_broker_id)
     if exchange_id == "okx":
@@ -281,6 +291,11 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         # Note: Market category validation should be done at the caller level
         # This factory only creates clients based on exchange_id
         return create_mt5_client(exchange_config)
+
+    # Alpaca: REST broker for US stocks + crypto (no local terminal needed).
+    # Caller is responsible for validating market_category in (USStock, Crypto).
+    if exchange_id == "alpaca":
+        return create_alpaca_client(exchange_config)
 
     raise LiveTradingError(f"Unsupported exchange_id: {exchange_id}")
 
@@ -418,6 +433,64 @@ def create_mt5_client(exchange_config: Dict[str, Any]):
             "3. You are on Windows"
         )
 
+    return client
+
+
+def create_alpaca_client(exchange_config: Dict[str, Any]):
+    """
+    Create Alpaca client for US stock + crypto trading.
+
+    exchange_config should contain:
+    - api_key:    Alpaca API key (PK*=paper, AK*=live)
+    - secret_key: Alpaca API secret
+    - paper:      Boolean (default True). 'true'/'false' strings also accepted.
+    - base_url:   Optional explicit URL override (otherwise paper/live decides)
+
+    Unlike IBKR/MT5, Alpaca is stateless REST — no terminal/gateway needed,
+    so it's the recommended USStock broker on cloud / SaaS deployments where
+    ALLOW_LOCAL_DESKTOP_BROKERS is false.
+    """
+    global AlpacaClient, AlpacaConfig
+
+    if AlpacaClient is None or AlpacaConfig is None:
+        try:
+            from app.services.alpaca_trading import AlpacaClient as _AlpacaClient, AlpacaConfig as _AlpacaConfig
+            AlpacaClient = _AlpacaClient
+            AlpacaConfig = _AlpacaConfig
+        except ImportError:
+            raise LiveTradingError("Alpaca trading requires alpaca-py. Run: pip install alpaca-py")
+
+    api_key = _get(exchange_config, "api_key", "apiKey")
+    secret_key = _get(exchange_config, "secret_key", "secret", "secretKey")
+    if not api_key or not secret_key:
+        raise LiveTradingError("Alpaca requires api_key and secret_key")
+
+    # Paper mode: explicit flag wins; otherwise infer from key prefix (PK = paper).
+    paper_raw = exchange_config.get("paper")
+    if paper_raw is None:
+        paper_raw = exchange_config.get("is_paper")
+    if isinstance(paper_raw, bool):
+        paper = paper_raw
+    elif isinstance(paper_raw, str) and paper_raw.strip():
+        paper = paper_raw.strip().lower() in ("1", "true", "yes", "on", "paper")
+    else:
+        paper = api_key.upper().startswith("PK")
+
+    base_url = _get(exchange_config, "base_url", "baseUrl") or None
+
+    config = AlpacaConfig(
+        api_key=api_key,
+        secret_key=secret_key,
+        paper=paper,
+        base_url=base_url,
+    )
+
+    client = AlpacaClient(config)
+    if not client.connect():
+        raise LiveTradingError(
+            "Failed to connect to Alpaca. Please check api_key/secret and "
+            "the paper/live flag (PK*=paper, AK*=live)."
+        )
     return client
 
 

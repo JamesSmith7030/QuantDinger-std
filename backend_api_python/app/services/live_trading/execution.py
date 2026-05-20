@@ -37,6 +37,9 @@ IBKRClient = None
 # Lazy import MT5
 MT5Client = None
 
+# Lazy import Alpaca
+AlpacaClient = None
+
 
 def _normalize_symbol_for_order(symbol: str, market_type: str = "swap") -> str:
     """
@@ -307,6 +310,24 @@ def place_order_from_signal(
             exchange_config=exchange_config,
         )
 
+    # Check for Alpaca client (US stocks + crypto via REST)
+    global AlpacaClient
+    if AlpacaClient is None:
+        try:
+            from app.services.alpaca_trading import AlpacaClient as _AlpacaClient
+            AlpacaClient = _AlpacaClient
+        except ImportError:
+            pass
+
+    if AlpacaClient is not None and isinstance(client, AlpacaClient):
+        return _place_alpaca_order(
+            client=client,
+            signal_type=signal_type,
+            symbol=symbol,
+            amount=qty,
+            exchange_config=exchange_config,
+        )
+
     raise LiveTradingError(f"Unsupported client type: {type(client)}")
 
 
@@ -419,6 +440,61 @@ def _place_mt5_order(
             "status": result.status,
             "message": result.message,
             "deal_id": result.deal_id,
+            "raw": result.raw,
+        },
+    )
+
+
+def _place_alpaca_order(
+    client,
+    *,
+    signal_type: str,
+    symbol: str,
+    amount: float,
+    exchange_config: Optional[Dict[str, Any]] = None,
+) -> LiveOrderResult:
+    """
+    Place order via Alpaca for US stocks (USStock) or crypto.
+
+    Signal mapping mirrors IBKR for stocks (no short selling in this basic flow);
+    for crypto the same long-only mapping is used since Alpaca crypto doesn't
+    support shorting either.
+
+    - open_long  / add_long   -> BUY
+    - close_long / reduce_long -> SELL
+    - any *_short signal      -> rejected
+    """
+    sig = (signal_type or "").strip().lower()
+
+    if "short" in sig:
+        raise LiveTradingError("Alpaca does not support short signals (long-only)")
+
+    if sig in ("open_long", "add_long"):
+        action = "buy"
+    elif sig in ("close_long", "reduce_long"):
+        action = "sell"
+    else:
+        raise LiveTradingError(f"Unsupported signal_type for Alpaca: {signal_type}")
+
+    cfg = exchange_config if isinstance(exchange_config, dict) else {}
+    raw_market = str(cfg.get("market_category") or cfg.get("market_type") or "USStock").strip().lower()
+    market_type = "crypto" if raw_market in ("crypto", "cryptocurrency") else "USStock"
+
+    result = client.place_market_order(
+        symbol=symbol,
+        side=action,
+        quantity=amount,
+        market_type=market_type,
+    )
+
+    return LiveOrderResult(
+        success=result.success,
+        exchange_order_id=str(result.order_id) if result.order_id else "",
+        filled=result.filled,
+        avg_price=result.avg_price,
+        raw={
+            "status": result.status,
+            "message": result.message,
             "raw": result.raw,
         },
     )

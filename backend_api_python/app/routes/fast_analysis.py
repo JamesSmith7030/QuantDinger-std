@@ -158,7 +158,7 @@ def analyze():
                 'data': {'in_progress': True}
             }), 429
 
-        # Billing / credits (best-effort, consistent with polymarket deep analysis)
+        # Billing / credits (best-effort)
         credits_charged = 0
         remaining_credits = None
         billing_consumed = False

@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/v/release/brokermr810/QuantDinger?style=flat-square&color=orange&label=Version" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger là nền tảng định lượng **tự lưu trữ, ưu tiên cục bộ**, gom **nghiên cứu hỗ trợ AI**, **chiến lược Python gốc**, **kiểm thử lùi** và **giao dịch thực** (tiền mã hóa, cổ phiếu Mỹ qua IBKR, FX qua MT5) trong **một sản phẩm**.
+> QuantDinger là nền tảng định lượng **tự lưu trữ, ưu tiên cục bộ**, gom **nghiên cứu hỗ trợ AI**, **chiến lược Python gốc**, **kiểm thử lùi** và **giao dịch thực** (tiền mã hóa, cổ phiếu Mỹ qua IBKR, FX qua MT5, cổ phiếu Mỹ / ETF / tiền mã hóa qua Alpaca) trong **một sản phẩm**.
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="Kiến trúc QuantDinger" width="960">
@@ -70,7 +70,7 @@
 
 ## Bắt đầu nhanh
 
-**Yêu cầu:** [Docker](https://docs.docker.com/get-docker/) + Compose và **Git**. **Không cần Node.js** (giao diện web đã build sẵn trong `frontend/dist`).
+**Yêu cầu:** [Docker](https://docs.docker.com/get-docker/) + Compose và **Git**. **Không cần Node.js** (ảnh frontend được kéo từ GHCR).
 
 ### macOS / Linux
 
@@ -108,13 +108,14 @@ Mở **`http://localhost:8888`**, đăng nhập **`quantdinger` / `123456`**, r�
 | Kho | Nội dung |
 |-----|----------|
 | **[QuantDinger](https://github.com/brokermr810/QuantDinger)** (kho này) | Backend, Compose, tài liệu, web đã build |
-| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **Mã nguồn web** (Vue) — `npm run build` rồi thay `frontend/dist` |
+| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **Mã nguồn web** (Vue) — tag `v*` tự động phát hành `ghcr.io/brokermr810/quantdinger-frontend` |
 | **[QuantDinger-Mobile](https://github.com/brokermr810/QuantDinger-Mobile)** | **Ứng dụng di động** (mã nguồn mở) |
 
 <h2 id="mcp--agent-gateway">MCP / Agent Gateway</h2>
 
 Dành cho **Cursor / Claude Code / Codex**: **Model Context Protocol (MCP)** và **Agent Gateway** (`/api/agent/v1`). Tài liệu chi tiết bằng tiếng Anh là nguồn chính:
 
+- **Hướng dẫn kết nối:** [**MCP_SETUP.md**](agent/MCP_SETUP.md) — Hosted / tự host, stdio cục bộ, HTTP từ xa, Claude Code CLI gộp trong một trang.
 - [AGENT_QUICKSTART.md](agent/AGENT_QUICKSTART.md) · [AI_INTEGRATION_DESIGN.md](agent/AI_INTEGRATION_DESIGN.md) · [agent-openapi.json](agent/agent-openapi.json)
 - Máy chủ MCP: [`../mcp_server/README.md`](../mcp_server/README.md) · PyPI [`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)
 
@@ -122,7 +123,7 @@ Dành cho **Cursor / Claude Code / Codex**: **Model Context Protocol (MCP)** và
 
 ## Tổng quan sản phẩm
 
-Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi + giao dịch thực**, có thể tự host. Thông tin xác thực nằm trong **PostgreSQL** và **`.env`**. Sàn tiền mã hóa, IBKR, MT5, LLM kết nối qua biến môi trường.
+Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi + giao dịch thực**, có thể tự host. Thông tin xác thực nằm trong **PostgreSQL** và **`.env`**. Sàn tiền mã hóa, IBKR, MT5, Alpaca, LLM kết nối qua biến môi trường.
 
 ## Tour hình ảnh
 
@@ -147,10 +148,10 @@ Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi 
 
 ## Điểm nổi bật
 
-- **Nghiên cứu &amp; AI** — Phân tích đa LLM, danh mục theo dõi, lịch sử; NL→mã; quy trình Polymarket; tích hợp **Agent / MCP**.
+- **Nghiên cứu &amp; AI** — Phân tích đa LLM, danh mục theo dõi, lịch sử; NL→mã; tích hợp **Agent / MCP**.
 - **Xây dựng** — `IndicatorStrategy` và `ScriptStrategy` (`on_bar`); giao diện nến chuyên nghiệp.
 - **Xác minh** — Kiểm thử lùi phía máy chủ, đường vốn.
-- **Vận hành** — Thực thi tiền mã hóa, giao dịch nhanh, IBKR / MT5; Telegram, email, Discord, Webhook, v.v.
+- **Vận hành** — Thực thi tiền mã hóa, giao dịch nhanh, IBKR / MT5 / Alpaca (cổ Mỹ · ETF · tiền mã hóa); Telegram, email, Discord, Webhook, v.v.
 - **Nền tảng** — Docker Compose, Postgres, Redis, OAuth, đa người dùng, tín dụng / thành viên / USDT.
 
 ## Kiến trúc
@@ -179,7 +180,7 @@ flowchart LR
     subgraph EXT[Bên ngoài]
         LLM[LLM]
         EXCH[Sàn]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -200,6 +201,14 @@ flowchart LR
 1. Clone rồi `cp backend_api_python/env.example backend_api_python/.env`
 2. **Phải đặt `SECRET_KEY`** (giữ placeholder thì backend không khởi động). Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **Tùy chọn (không cần clone repo)**: kéo image backend + frontend đa kiến trúc (amd64/arm64) sẵn từ GHCR:
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     Image mặc định: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. Ghim đồng thời cả hai bằng `IMAGE_TAG=v3.0.9` trong `.env` cục bộ, hoặc ghim từng bên với `BACKEND_TAG` / `FRONTEND_TAG`.
+   - **Phát triển frontend cục bộ**: clone `QuantDinger-Vue` vào `./QuantDinger-Vue/` (đã gitignore) rồi chạy `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`. Chi tiết xem [README tiếng Anh](../README.md#alternative-build-the-frontend-from-vue-source).
 4. **Web:** `http://localhost:8888` · **Sức khỏe API:** `http://localhost:5000/api/health`
 5. Đổi mật khẩu quản trị mặc định trước production. Đặt **`FRONTEND_URL`** trong `backend_api_python/.env` đúng URL thực tế.
 
@@ -221,7 +230,7 @@ Khác: [multi-user-setup.md](multi-user-setup.md) · [IBKR](IBKR_TRADING_GUIDE_E
 
 **Có thật sự tự host được không?** Có, triển khai bằng Docker Compose trên hạ tầng của bạn.
 
-**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR (cổ Mỹ), MT5 (FX), và Polymarket cho nghiên cứu.
+**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR / Alpaca (cổ Mỹ · ETF · tiền mã hóa) và MT5 (FX).
 
 **Viết chiến lược bằng Python được không?** Có, hỗ trợ `IndicatorStrategy` và `ScriptStrategy`.
 

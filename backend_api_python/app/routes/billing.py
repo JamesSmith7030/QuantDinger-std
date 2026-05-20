@@ -52,23 +52,42 @@ def purchase_membership():
 # =========================
 
 
+@billing_bp.route("/usdt/chains", methods=["GET"])
+@login_required
+def usdt_list_chains():
+    """List USDT chains that are enabled AND have a receiving address
+    configured. Chains without an address are auto-hidden by the backend
+    so the frontend chain picker can render the response verbatim.
+    """
+    try:
+        chains = get_usdt_payment_service().list_chains()
+        return jsonify({"code": 1, "msg": "success", "data": {"chains": chains}})
+    except Exception as e:
+        logger.error(f"usdt_list_chains failed: {e}", exc_info=True)
+        return jsonify({"code": 0, "msg": str(e), "data": None}), 500
+
+
 @billing_bp.route("/usdt/create", methods=["POST"])
 @login_required
 def usdt_create_order():
-    """
-    Create USDT order for membership plan (per-order address).
+    """Create a USDT membership order.
 
     Body:
-      { plan: "monthly"|"yearly"|"lifetime" }
+      {
+        plan:  "monthly" | "yearly" | "lifetime",
+        chain: "TRC20" | "BEP20" | "ERC20" | "SOL"   # optional; defaults to
+                                                     # the first enabled chain
+      }
     """
     try:
         user_id = getattr(g, "user_id", None)
         data = request.get_json() or {}
         plan = (data.get("plan") or "").strip().lower()
+        chain = (data.get("chain") or "").strip().upper() or None
         if not plan:
             return jsonify({"code": 0, "msg": "missing_plan", "data": None}), 400
 
-        ok, msg, out = get_usdt_payment_service().create_order(user_id, plan)
+        ok, msg, out = get_usdt_payment_service().create_order(user_id, plan, chain=chain)
         if ok:
             return jsonify({"code": 1, "msg": "success", "data": out})
         return jsonify({"code": 0, "msg": msg, "data": out}), 400

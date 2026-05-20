@@ -12,6 +12,50 @@ from app.config import CCXTConfig, APIKeys
 
 logger = get_logger(__name__)
 
+# Live-trading scoped instances: one CCXT client per (exchange, spot|swap).
+_SCOPED_INSTANCES: Dict[str, "CryptoDataSource"] = {}
+
+
+def resolve_ccxt_for_live_trading(exchange_id: str, market_type: str) -> Tuple[str, Dict[str, Any]]:
+    """Map QuantDinger exchange_id + market_type to a CCXT class id and options.
+
+    Used for **public** OHLCV/ticker only (no API keys). Keeps chart/backtest on
+    ``CCXTConfig.DEFAULT_EXCHANGE`` while running crypto strategies (signal/live)
+    use the same venue as the strategy's configured exchange.
+    """
+    e = (exchange_id or "").strip().lower()
+    mt = (market_type or "swap").strip().lower()
+    if mt in ("futures", "future", "perp", "perpetual"):
+        mt = "swap"
+
+    opts: Dict[str, Any] = {}
+    ccxt_id = e or "binance"
+
+    if e == "binance":
+        ccxt_id = "binanceusdm" if mt == "swap" else "binance"
+    elif e == "okx":
+        opts["defaultType"] = "swap" if mt == "swap" else "spot"
+    elif e == "bybit":
+        opts["defaultType"] = "linear" if mt == "swap" else "spot"
+    elif e == "bitget":
+        opts["defaultType"] = "swap" if mt == "swap" else "spot"
+    elif e == "gate":
+        opts["defaultType"] = "swap" if mt == "swap" else "spot"
+    elif e == "kucoin":
+        ccxt_id = "kucoinfutures" if mt == "swap" else "kucoin"
+    elif e == "kraken":
+        ccxt_id = "krakenfutures" if mt == "swap" else "kraken"
+    elif e == "deepcoin":
+        opts["defaultType"] = "swap" if mt == "swap" else "spot"
+    elif e == "htx" or e == "huobi":
+        ccxt_id = "htx"
+        opts["defaultType"] = "swap" if mt == "swap" else "spot"
+    elif e == "coinbase":
+        ccxt_id = "coinbase"
+    # unknown id: pass through and let ccxt raise if unsupported
+
+    return ccxt_id, opts
+
 
 class CryptoDataSource(BaseDataSource):
     """加密货币数据源"""
@@ -20,36 +64,89 @@ class CryptoDataSource(BaseDataSource):
     
     # 时间周期映射
     TIMEFRAME_MAP = CCXTConfig.TIMEFRAME_MAP
-    
+
+    # 当某个交易所原生不支持某个CCXT周期时，从更细的granularity拉数据后聚合。
+    # 例如Coinbase Advanced Trade只暴露1m/5m/15m/30m/1h/2h/6h/1d，没有3m/4h/1w，
+    # 这里给出每个缺失目标对应的"源周期 + 倍数"候选（按优先顺序）。
+    _RESAMPLE_CANDIDATES: Dict[str, List[Tuple[str, int]]] = {
+        '3m': [('1m', 3)],
+        '4h': [('2h', 2), ('1h', 4)],
+        '1w': [('1d', 7)],
+    }
+
+    # CCXT单次fetch_ohlcv请求上限（Coinbase REST是300，多数交易所也在300附近）。
+    # 聚合路径fetch源数据时按这个值兜底，避免请求被服务端截断。
+    _SINGLE_FETCH_HARD_CAP = 300
+
     # 常见的报价货币列表（按优先级排序）
     COMMON_QUOTES = ['USDT', 'USD', 'BTC', 'ETH', 'BUSD', 'USDC', 'BNB', 'EUR', 'GBP']
     
     def __init__(self):
-        config = {
-            'timeout': CCXTConfig.TIMEOUT,
-            'enableRateLimit': CCXTConfig.ENABLE_RATE_LIMIT
+        self._scoped_exchange_id = ""
+        self._scoped_market_type = "spot"
+        default_ex = (CCXTConfig.DEFAULT_EXCHANGE or "binance").strip().lower()
+        self._init_ccxt_exchange(default_ex, {})
+
+    @classmethod
+    def for_exchange(cls, exchange_id: str, market_type: str = "swap") -> "CryptoDataSource":
+        """Return a cached data source bound to a live-trading venue (crypto only)."""
+        ccxt_id, options = resolve_ccxt_for_live_trading(exchange_id, market_type)
+        mt = (market_type or "swap").strip().lower()
+        if mt in ("futures", "future", "perp", "perpetual"):
+            mt = "swap"
+        cache_key = f"{ccxt_id}|{mt}|{sorted(options.items())}"
+        cached = _SCOPED_INSTANCES.get(cache_key)
+        if cached is not None:
+            return cached
+        inst = object.__new__(cls)
+        inst._scoped_exchange_id = (exchange_id or "").strip().lower()
+        inst._scoped_market_type = mt
+        inst._init_ccxt_exchange(ccxt_id, options)
+        _SCOPED_INSTANCES[cache_key] = inst
+        logger.info(
+            "CryptoDataSource scoped for live trading: exchange=%s market_type=%s ccxt=%s options=%s",
+            inst._scoped_exchange_id,
+            mt,
+            ccxt_id,
+            options,
+        )
+        return inst
+
+    def _init_ccxt_exchange(self, ccxt_exchange_id: str, options: Optional[Dict[str, Any]] = None) -> None:
+        config: Dict[str, Any] = {
+            "timeout": CCXTConfig.TIMEOUT,
+            "enableRateLimit": CCXTConfig.ENABLE_RATE_LIMIT,
         }
-        
-        # 如果配置了代理
         if CCXTConfig.PROXY:
-            config['proxies'] = {
-                'http': CCXTConfig.PROXY,
-                'https': CCXTConfig.PROXY
-            }
-        
-        exchange_id = CCXTConfig.DEFAULT_EXCHANGE
-        
-        # 动态加载交易所类
+            config["proxies"] = {"http": CCXTConfig.PROXY, "https": CCXTConfig.PROXY}
+        if options:
+            config.setdefault("options", {}).update(dict(options))
+
+        exchange_id = (ccxt_exchange_id or "").strip().lower()
         if not hasattr(ccxt, exchange_id):
-            logger.warning(f"CCXT exchange '{exchange_id}' not found, falling back to 'coinbase'")
-            exchange_id = 'coinbase'
-            
+            logger.warning("CCXT exchange '%s' not found, falling back to 'binance'", exchange_id)
+            exchange_id = "binance"
+
         exchange_class = getattr(ccxt, exchange_id)
         self.exchange = exchange_class(config)
-        
-        # 延迟加载 markets（首次使用时加载）
         self._markets_loaded = False
         self._markets_cache = None
+
+    def _symbol_for_scoped_market(self, symbol: str) -> str:
+        """CCXT linear/swap symbols often need ``BASE/QUOTE:QUOTE`` (e.g. BTC/USDT:USDT)."""
+        normalized = self._normalize_symbol_for_exchange(symbol)
+        if not normalized:
+            return symbol
+        mt = getattr(self, "_scoped_market_type", "") or "spot"
+        if mt != "swap":
+            return normalized
+        if ":" in normalized:
+            return normalized
+        if "/" in normalized:
+            _base, quote = normalized.split("/", 1)
+            if quote:
+                return f"{normalized}:{quote}"
+        return normalized
     
     def _ensure_markets_loaded(self) -> bool:
         """确保 markets 已加载（用于符号验证）"""
@@ -185,9 +282,8 @@ class CryptoDataSource(BaseDataSource):
         if not symbol or not symbol.strip():
             return {'last': 0, 'symbol': symbol}
         
-        # 规范化符号
-        normalized = self._normalize_symbol_for_exchange(symbol)
-        
+        normalized = self._symbol_for_scoped_market(symbol)
+
         if not normalized:
             logger.warning(f"Failed to normalize symbol: {symbol}")
             return {'last': 0, 'symbol': symbol}
@@ -242,24 +338,64 @@ class CryptoDataSource(BaseDataSource):
         
         try:
             ccxt_timeframe = self.TIMEFRAME_MAP.get(timeframe, '1d')
-            
-            # 使用统一的符号规范化方法
-            symbol_pair = self._normalize_symbol_for_exchange(symbol)
-            
+
+            # 如果当前交易所原生不支持这个周期（典型例子：Coinbase 没有 1w/4h/3m），
+            # 改为从更细的granularity拉数据，再在服务端聚合成目标周期。这样1W/4H在
+            # 不支持的交易所上仍可使用，无需前端改动。
+            resample_bucket = 1
+            fetch_ccxt_timeframe = ccxt_timeframe
+            fetch_qd_timeframe = timeframe
+            fetch_limit = limit
+
+            exchange_timeframes = getattr(self.exchange, 'timeframes', None) or {}
+            if exchange_timeframes and ccxt_timeframe not in exchange_timeframes:
+                picked = self._pick_resample_source(ccxt_timeframe, exchange_timeframes)
+                if picked is None:
+                    logger.warning(
+                        f"Exchange '{self.exchange.id}' cannot serve timeframe '{ccxt_timeframe}' "
+                        f"and no finer supported granularity is available for resampling. "
+                        f"Supported: {sorted(exchange_timeframes.keys())}"
+                    )
+                    return []
+                source_ccxt_tf, bucket = picked
+                fetch_ccxt_timeframe = source_ccxt_tf
+                fetch_qd_timeframe = self._ccxt_to_qd_timeframe(source_ccxt_tf, timeframe)
+                resample_bucket = bucket
+                # 单次fetch_ohlcv受交易所上限制约（Coinbase=300），超出会被截断；
+                # 在这之内取尽量多的源candle以填满请求的聚合数。
+                fetch_limit = min(limit * bucket, self._SINGLE_FETCH_HARD_CAP)
+                logger.info(
+                    f"Exchange '{self.exchange.id}' has no native '{ccxt_timeframe}' "
+                    f"timeframe; fetching '{source_ccxt_tf}' x{bucket} candles "
+                    f"({fetch_limit}) and resampling to '{ccxt_timeframe}'"
+                )
+
+            symbol_pair = self._symbol_for_scoped_market(symbol)
+
             if not symbol_pair:
                 logger.warning(f"Failed to normalize symbol for K-line: {symbol}")
                 return []
-            
+
             # logger.info(f"获取加密货币K线: {symbol_pair}, 周期: {ccxt_timeframe}, 条数: {limit}")
-            
+
             ohlcv = self._fetch_ohlcv(
-                symbol_pair, ccxt_timeframe, limit, before_time, timeframe, after_time
+                symbol_pair, fetch_ccxt_timeframe, fetch_limit,
+                before_time, fetch_qd_timeframe, after_time,
             )
-            
+
             if not ohlcv:
                 logger.warning(f"CCXT returned no K-lines: {symbol_pair}")
                 return []
-            
+
+            if resample_bucket > 1:
+                ohlcv = self._resample_ohlcv(ohlcv, resample_bucket)
+                if not ohlcv:
+                    logger.warning(
+                        f"Resampling produced no candles for {symbol_pair} "
+                        f"(bucket={resample_bucket}, source len was less than one bucket)"
+                    )
+                    return []
+
             # 转换数据格式
             for candle in ohlcv:
                 if len(candle) < 6:
@@ -304,7 +440,58 @@ class CryptoDataSource(BaseDataSource):
             logger.error(traceback.format_exc())
         
         return klines
-    
+
+    @classmethod
+    def _pick_resample_source(
+        cls,
+        target_ccxt_timeframe: str,
+        exchange_timeframes: Dict[str, Any],
+    ) -> Optional[Tuple[str, int]]:
+        """Pick the finest supported source timeframe to resample into `target_ccxt_timeframe`.
+
+        Returns (source_ccxt_timeframe, bucket_size) or None if no candidate is supported.
+        """
+        for source, bucket in cls._RESAMPLE_CANDIDATES.get(target_ccxt_timeframe, []):
+            if source in exchange_timeframes:
+                return source, bucket
+        return None
+
+    @staticmethod
+    def _resample_ohlcv(ohlcv: List[List[Any]], bucket_size: int) -> List[List[Any]]:
+        """Aggregate every `bucket_size` consecutive CCXT OHLCV rows into one larger candle.
+
+        Each input row is [ts_ms, open, high, low, close, volume]. Output preserves the
+        first row's timestamp and open, takes max(high)/min(low), the last row's close,
+        and sums volume. The trailing partial bucket is dropped so every returned candle
+        represents `bucket_size` source candles.
+        """
+        if bucket_size <= 1 or not ohlcv:
+            return list(ohlcv or [])
+        out: List[List[Any]] = []
+        for i in range(0, len(ohlcv), bucket_size):
+            chunk = ohlcv[i:i + bucket_size]
+            if len(chunk) < bucket_size:
+                break  # drop incomplete trailing bucket
+            out.append([
+                chunk[0][0],
+                chunk[0][1],
+                max(c[2] for c in chunk),
+                min(c[3] for c in chunk),
+                chunk[-1][4],
+                sum(c[5] for c in chunk),
+            ])
+        return out
+
+    @classmethod
+    def _ccxt_to_qd_timeframe(cls, ccxt_tf: str, fallback: str) -> str:
+        """Reverse the TIMEFRAME_MAP — e.g. '1d' → '1D'. Used so downstream helpers
+        that take the QuantDinger-style timeframe string get a consistent value when
+        we fetch a different granularity than originally requested."""
+        for qd, ccxt_value in cls.TIMEFRAME_MAP.items():
+            if ccxt_value == ccxt_tf:
+                return qd
+        return fallback
+
     def _fetch_ohlcv(
         self,
         symbol_pair: str,
@@ -347,22 +534,65 @@ class CryptoDataSource(BaseDataSource):
                 max_batches = 6000
                 empty_streak = 0
                 max_empty = 6
+                # Long-range fetches (months of 5m candles) need to be defensive
+                # about transient exchange errors and rate limits. We do per-batch
+                # retries, a short sleep between batches, and a wall-clock budget
+                # so the calling HTTP request can't spin forever and 500 out.
+                import time as _t
+                retry_per_batch = 2
+                inter_batch_sleep = 0.0
+                if not getattr(self.exchange, 'enableRateLimit', False):
+                    # If CCXT isn't throttling for us, throttle ourselves to ~6 req/s
+                    # to stay below typical exchange ceilings.
+                    inter_batch_sleep = 0.15
+                fetch_started_at = _t.monotonic()
+                # Hard wall-clock budget. 5m / 90 days needs ~86 batches; assume
+                # 1.5s/batch worst case => ~130s. We give 180s headroom.
+                fetch_budget_seconds = 180.0
 
-                for _ in range(max_batches):
+                for batch_idx in range(max_batches):
                     if current_since >= end_ms:
                         break
-                    batch = self.exchange.fetch_ohlcv(
-                        symbol_pair,
-                        ccxt_timeframe,
-                        since=current_since,
-                        limit=batch_limit,
-                    )
+                    if (_t.monotonic() - fetch_started_at) > fetch_budget_seconds:
+                        logger.warning(
+                            f"CCXT paginated fetch budget exceeded for {symbol_pair} {ccxt_timeframe} "
+                            f"after {batch_idx} batches ({len(all_ohlcv)} candles); returning partial."
+                        )
+                        break
+
+                    batch = None
+                    last_err = None
+                    for attempt in range(retry_per_batch + 1):
+                        try:
+                            batch = self.exchange.fetch_ohlcv(
+                                symbol_pair,
+                                ccxt_timeframe,
+                                since=current_since,
+                                limit=batch_limit,
+                            )
+                            break
+                        except Exception as exc:
+                            last_err = exc
+                            if attempt < retry_per_batch:
+                                # Brief back-off (0.5s, 1.5s) tolerates short rate-limit / network blips
+                                # without amplifying load when the exchange is genuinely down.
+                                _t.sleep(0.5 + attempt * 1.0)
+                                continue
+                            raise
+                    if batch is None:
+                        # Exhausted retries — re-raise so the outer except can flip
+                        # to the fallback path. Should not reach here because the
+                        # last attempt re-raises directly, but kept for clarity.
+                        raise last_err if last_err else RuntimeError("CCXT fetch_ohlcv failed without error")
+
                     if not batch:
                         empty_streak += 1
                         if empty_streak >= max_empty:
                             break
                         # 跳过可能的空档，避免卡死在同一 since
                         current_since += timeframe_ms * min(batch_limit, 64)
+                        if inter_batch_sleep:
+                            _t.sleep(inter_batch_sleep)
                         continue
                     empty_streak = 0
                     all_ohlcv.extend(batch)
@@ -373,16 +603,24 @@ class CryptoDataSource(BaseDataSource):
                     if next_since <= current_since:
                         break
                     current_since = next_since
+                    if inter_batch_sleep:
+                        _t.sleep(inter_batch_sleep)
 
                 # 按开盘时间去重并排序，防止分页重叠
                 by_ts = {int(row[0]): row for row in all_ohlcv if row and len(row) >= 6}
                 ohlcv = sorted(by_ts.values(), key=lambda r: r[0])
             else:
-                ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, limit=limit)
-            
+                # No window specified: ask for at most the exchange's per-call cap.
+                # Passing the raw `limit` here can be tens of thousands for long
+                # high-precision backtests; most exchanges respond by either
+                # rejecting the request outright or silently truncating, which
+                # downstream code then interprets as "empty data".
+                safe_limit = min(int(limit), self._SINGLE_FETCH_HARD_CAP)
+                ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, limit=safe_limit)
+
             # logger.info(f"CCXT 返回 {len(ohlcv) if ohlcv else 0} 条数据")
             return ohlcv
-            
+
         except Exception as e:
             logger.warning(f"CCXT fetch_ohlcv failed: {str(e)}; trying fallback")
             return self._fetch_ohlcv_fallback(
@@ -418,7 +656,14 @@ class CryptoDataSource(BaseDataSource):
             else:
                 since = int((datetime.now() - timedelta(seconds=total_seconds)).timestamp() * 1000)
             
-            ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, since=since, limit=limit)
+            # IMPORTANT: most exchanges cap fetch_ohlcv at 300–1000 candles per
+            # call. The original code forwarded the caller's `limit` verbatim
+            # (often 50k+ for long-range backtests), which the exchange would
+            # then reject or silently truncate — making this "fallback" useless
+            # exactly when it mattered. Cap it so we at least return one valid
+            # page of data, which downstream callers can then handle gracefully.
+            safe_limit = min(int(limit), self._SINGLE_FETCH_HARD_CAP)
+            ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, since=since, limit=safe_limit)
             # logger.info(f"CCXT 备用方法返回 {len(ohlcv) if ohlcv else 0} 条数据")
             return ohlcv
         except Exception as e:

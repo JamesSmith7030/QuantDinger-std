@@ -1,8 +1,6 @@
 """Read-class market data endpoints."""
 from __future__ import annotations
 
-import os
-
 from app.data.market_symbols_seed import (
     get_hot_symbols as seed_get_hot_symbols,
     search_symbols as seed_search_symbols,
@@ -12,6 +10,7 @@ from app.utils.agent_auth import (
     SCOPE_R, agent_required, instrument_allowed, market_allowed,
 )
 from app.utils.logger import get_logger
+from app.utils.market_visibility import is_market_visible
 from flask import request
 
 from . import agent_v1_bp
@@ -23,8 +22,6 @@ _kline_service = KlineService()
 
 _MARKETS = [
     {"value": "USStock",  "label": "US Stocks"},
-    # Hidden by default (same reason as /api/market/types): prebuilt frontend in this repo.
-    # Set SHOW_CN_STOCK=true to expose via the Agent API too.
     {"value": "CNStock",  "label": "China A-shares"},
     {"value": "HKStock",  "label": "HK Stocks"},
     {"value": "Crypto",   "label": "Crypto"},
@@ -39,13 +36,16 @@ _MARKETS = [
 def list_markets():
     """List markets the calling token is allowed to query.
 
-    The base catalog is platform-wide; the response is filtered by the token's
-    `markets` allowlist so agents can self-discover their effective surface.
+    Filtering is the intersection of three rules:
+      1. The token's ``markets`` allowlist (set per credential).
+      2. Per-deployment visibility (``ENABLED_MARKETS`` / legacy ``SHOW_*``),
+         resolved by :func:`app.utils.market_visibility.is_market_visible` so
+         the Agent API stays in lock-step with the watchlist picker.
     """
-    show_cn_stock = str(os.getenv("SHOW_CN_STOCK", "false")).strip().lower() in ("1", "true", "yes", "on")
-    visible = [m for m in _MARKETS if market_allowed(m["value"])]
-    if not show_cn_stock:
-        visible = [m for m in visible if m.get("value") != "CNStock"]
+    visible = [
+        m for m in _MARKETS
+        if market_allowed(m["value"]) and is_market_visible(m["value"])
+    ]
     return envelope(visible)
 
 

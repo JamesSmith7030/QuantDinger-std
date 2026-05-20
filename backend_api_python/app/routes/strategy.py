@@ -3,6 +3,7 @@ Trading Strategy API Routes
 """
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, timezone
+from typing import Optional
 import json
 import re
 import traceback
@@ -271,6 +272,15 @@ def get_strategy_template(key):
         if t.get('key') == key:
             return jsonify({'code': 1, 'msg': 'success', 'data': t})
     return jsonify({'code': 0, 'msg': 'Template not found'}), 404
+
+
+@strategy_bp.route('/bots/grid-script', methods=['GET'])
+@login_required
+def get_grid_bot_script():
+    """Canonical grid bot ScriptStrategy source (adaptive bounds + waterfall aware)."""
+    from app.services.bot_scripts.grid_template import build_grid_bot_script
+
+    return jsonify({'code': 1, 'msg': 'success', 'data': {'script': build_grid_bot_script()}})
 
 
 # Local mode: avoid heavy initialization during module import.
@@ -775,6 +785,36 @@ def get_trades():
         return jsonify({'code': 0, 'msg': str(e), 'data': {'trades': [], 'items': []}}), 500
 
 
+@strategy_bp.route('/strategies/dry-run-deviation', methods=['GET'])
+@login_required
+def get_dry_run_deviation():
+    """Quantify how far live fills drifted from backtest signal closes.
+
+    For every recorded trade the service rebuilds the prior closed bar (the
+    one a backtest would have used as the decision price) and computes per-
+    trade slippage / latency, plus a summary verdict.
+    """
+    try:
+        user_id = int(g.user_id)
+        strategy_id = request.args.get('id', type=int)
+        if not strategy_id:
+            return jsonify({'code': 0, 'msg': 'Missing strategy id parameter', 'data': None}), 400
+        limit = max(20, min(int(request.args.get('limit') or 200), 1000))
+
+        from app.services.dry_run_deviation import DryRunDeviationService
+        svc = DryRunDeviationService()
+        report = svc.build_report(
+            strategy_id=strategy_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        return jsonify({'code': 1, 'msg': 'success', 'data': report})
+    except Exception as exc:
+        logger.error("get_dry_run_deviation failed: %s", exc)
+        logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(exc), 'data': None}), 500
+
+
 @strategy_bp.route('/strategies/positions', methods=['GET'])
 @login_required
 def get_positions():
@@ -902,7 +942,7 @@ def _build_strategy_equity_curve(user_id: int, strategy_id: int):
         cur = db.cursor()
         cur.execute(
             """
-            SELECT created_at, profit
+            SELECT created_at, profit, commission
             FROM qd_strategy_trades
             WHERE strategy_id = ?
             ORDER BY created_at ASC
@@ -925,7 +965,8 @@ def _build_strategy_equity_curve(user_id: int, strategy_id: int):
     curve = []
     for r in rows:
         try:
-            equity += float(r.get('profit') or 0)
+            # Net equity step: gross trade P&L minus exchange-synced fee.
+            equity += float(r.get('profit') or 0) - float(r.get('commission') or 0)
         except Exception:
             pass
         created_at = r.get('created_at')
@@ -1553,38 +1594,52 @@ def ai_generate_strategy():
             return jsonify({'code': '', 'msg': msg, 'params': None})
 
         if intent == 'bot_recommend':
-            # ── Extract symbol from user prompt and fetch real market data ──
+            # ── Detect (market, symbol) from prompt and fetch real K-lines ──
+            # Symbol detection is delegated to ai_bot_symbol_detect so the
+            # logic is unit-testable and trivial to extend with new tickers.
+            # The route only knows: (a) what market it ended up being, and
+            # (b) what kline timeframe to ask for that market.
             market_data_section = ""
+            detected_market: str = ""
+            detected_symbol: Optional[str] = None
             try:
-                import re as _re
-                _symbol_map = {
-                    'BTC': 'BTC/USDT', 'ETH': 'ETH/USDT', 'SOL': 'SOL/USDT',
-                    'BNB': 'BNB/USDT', 'XRP': 'XRP/USDT', 'DOGE': 'DOGE/USDT',
-                    'ADA': 'ADA/USDT', 'AVAX': 'AVAX/USDT', 'DOT': 'DOT/USDT',
-                    'MATIC': 'MATIC/USDT', 'LINK': 'LINK/USDT', 'UNI': 'UNI/USDT',
-                    'ATOM': 'ATOM/USDT', 'LTC': 'LTC/USDT', 'FIL': 'FIL/USDT',
-                    'ARB': 'ARB/USDT', 'OP': 'OP/USDT', 'APT': 'APT/USDT',
-                    'SUI': 'SUI/USDT', 'PEPE': 'PEPE/USDT', 'WIF': 'WIF/USDT',
-                    'NEAR': 'NEAR/USDT', 'TRX': 'TRX/USDT', 'SHIB': 'SHIB/USDT',
-                }
-                prompt_upper = prompt.upper()
-                detected_symbol = None
-                for token, full_sym in _symbol_map.items():
-                    if token in prompt_upper:
-                        detected_symbol = full_sym
-                        break
-                if not detected_symbol:
-                    pair_match = _re.search(r'([A-Z]{2,10})\s*/?\s*USDT', prompt_upper)
-                    if pair_match:
-                        detected_symbol = pair_match.group(1) + '/USDT'
+                from app.services.ai_bot_symbol_detect import detect_market_and_symbol
+                from app.services.broker_market_policy import (
+                    BOT_TYPE_MARKETS, allowed_bot_types,
+                )
+                hit = detect_market_and_symbol(prompt)
+                if hit:
+                    detected_market, detected_symbol = hit
 
                 if detected_symbol:
                     from app.services.kline import KlineService
                     ks = KlineService()
-                    klines_4h = ks.get_kline(market='Crypto', symbol=detected_symbol, timeframe='4h', limit=50)
-                    klines_1d = ks.get_kline(market='Crypto', symbol=detected_symbol, timeframe='1d', limit=30)
-                    klines = klines_4h or klines_1d or []
-                    tf_label = '4h' if klines_4h else '1d'
+                    # Forex / USStock data sources may not return 4h candles;
+                    # try the broker's preferred frame first then degrade.
+                    candidate_frames = (
+                        ('4h', '1d', '1h')
+                        if detected_market == 'Crypto'
+                        else ('1d', '4h', '1h')
+                    )
+                    klines = []
+                    tf_label = ''
+                    for tf in candidate_frames:
+                        try:
+                            klines = ks.get_kline(
+                                market=detected_market,
+                                symbol=detected_symbol,
+                                timeframe=tf,
+                                limit=50 if tf in ('4h', '1h') else 30,
+                            ) or []
+                        except Exception as kl_err:
+                            logger.warning(
+                                "[AI Bot] kline fetch failed market=%s sym=%s tf=%s: %s",
+                                detected_market, detected_symbol, tf, kl_err,
+                            )
+                            klines = []
+                        if klines and len(klines) >= 5:
+                            tf_label = tf
+                            break
 
                     if klines and len(klines) >= 5:
                         closes = [float(k.get('close', 0)) for k in klines if k.get('close')]
@@ -1602,8 +1657,17 @@ def ai_generate_strategy():
                         sma20 = sum(closes[-20:]) / min(20, len(closes[-20:])) if len(closes) >= 20 else avg_price
                         volatility = ((high_recent - low_recent) / avg_price * 100) if avg_price else 0
 
+                        # Forex/USStock often have no volume data — omit the
+                        # noisy 'Avg Volume: 0.00' line in that case so the
+                        # LLM doesn't read into a meaningless number.
+                        vol_line = (
+                            f"Avg Volume: {avg_volume:.2f}\n"
+                            if avg_volume > 0 else ""
+                        )
+
                         market_data_section = (
-                            f"\n\n=== REAL-TIME MARKET DATA for {detected_symbol} (last {len(klines)} candles, {tf_label} timeframe) ===\n"
+                            f"\n\n=== REAL-TIME MARKET DATA for {detected_symbol} "
+                            f"(market={detected_market}, last {len(klines)} candles, {tf_label} timeframe) ===\n"
                             f"Current Price: {current_price}\n"
                             f"Period High: {high_recent}\n"
                             f"Period Low: {low_recent}\n"
@@ -1613,7 +1677,7 @@ def ai_generate_strategy():
                             f"SMA(20): {sma20:.4f}\n"
                             f"Trend: {'Bullish (SMA5 > SMA20)' if sma5 > sma20 else 'Bearish (SMA5 < SMA20)'}\n"
                             f"Volatility (range/avg): {volatility:.2f}%\n"
-                            f"Avg Volume: {avg_volume:.2f}\n"
+                            f"{vol_line}"
                             f"Recent 10 closes: {[round(c, 4) for c in closes[-10:]]}\n"
                             f"=== END MARKET DATA ===\n\n"
                             f"IMPORTANT: Use the REAL market data above to set realistic parameters. "
@@ -1621,25 +1685,63 @@ def ai_generate_strategy():
                             f"For trend bots, consider the current trend direction. "
                             f"For DCA bots, consider the price level and change percentage."
                         )
-                        logger.info(f"[AI Bot] Fetched market data for {detected_symbol}: price={current_price}, "
-                                    f"range=[{low_recent}, {high_recent}], change={price_change_pct:+.2f}%")
+                        logger.info(
+                            "[AI Bot] Fetched market data for %s/%s: price=%s, range=[%s, %s], change=%+.2f%%",
+                            detected_market, detected_symbol,
+                            current_price, low_recent, high_recent, price_change_pct,
+                        )
+                    elif detected_symbol:
+                        # Symbol was identified but no data came back. Tell
+                        # the LLM that explicitly so it can recommend a more
+                        # conservative bot type or fall back to user inputs.
+                        market_data_section = (
+                            f"\n\nNOTE: Symbol {detected_symbol} ({detected_market}) was identified "
+                            f"but no recent K-line data was available. Recommend conservative "
+                            f"defaults and tell the user to manually verify the upper/lower bounds.\n"
+                        )
+                        logger.warning(
+                            "[AI Bot] No klines returned for market=%s sym=%s; falling back to no-data prompt",
+                            detected_market, detected_symbol,
+                        )
             except Exception as mkt_err:
                 logger.warning(f"[AI Bot] Failed to fetch market data: {mkt_err}")
+
+            # Tell the LLM which bot types are usable for this market so it
+            # doesn't recommend e.g. grid on USStock (overnight gap risk).
+            if detected_market:
+                _allowed_bots_for_market = sorted(allowed_bot_types(detected_market)) or ['grid', 'martingale', 'trend', 'dca']
+            else:
+                _allowed_bots_for_market = ['grid', 'martingale', 'trend', 'dca']
+            _market_constraint_line = (
+                f"\nIMPORTANT MARKET CONSTRAINT: The detected market is "
+                f"'{detected_market or 'Crypto'}'. Allowed bot types for this market are: "
+                f"{_allowed_bots_for_market}. Do NOT recommend a botType outside this list.\n"
+                if detected_market else ""
+            )
+            # Quote-currency hint for capital field labelling (USD for
+            # forex/stock, USDT for crypto). Pure cosmetics for the LLM's
+            # 'reason' string.
+            _quote_label = 'USD' if detected_market in ('USStock', 'Forex') else 'USDT'
 
             system_prompt = (
                 "You are an expert quantitative trading advisor. The user wants to create an automated trading bot.\n"
                 "Based on their description AND the real-time market data provided, recommend one of the four bot types and provide optimal parameters.\n\n"
                 "Available bot types and their parameter schemas:\n"
-                "1. grid - Grid Trading: {upperPrice: number, lowerPrice: number, gridCount: int(5-100), amountPerGrid: number, gridMode: 'arithmetic'|'geometric'}\n"
+                "1. grid - Grid Trading: {upperPrice, lowerPrice, gridCount: int(5-100), amountPerGrid, gridMode: 'arithmetic'|'geometric', "
+                "gridDirection: 'long'|'short'|'neutral', adaptiveBounds: true, adaptiveAtrMult: 2.0, waterfallProtection: true, waterfallDropPct: 0.03; "
+                "martingale: waterfallProtection: true, waterfallDropPct: 0.04}\n"
                 "2. martingale - Martingale: {initialAmount: number, multiplier: number(1.1-3.0), maxLayers: int(2-10), priceDropPct: number(1-20), takeProfitPct: number(1-50)}\n"
                 "3. trend - Trend Following: {maPeriod: int(5-200), maType: 'SMA'|'EMA', confirmBars: int(1-5), positionPct: number(10-100), direction: 'long'|'short'|'both'}\n"
                 "4. dca - DCA (Dollar-Cost Averaging): {amountEach: number, frequency: 'every_bar'|'hourly'|'4h'|'daily'|'weekly'|'biweekly'|'monthly', totalBudget: number, dipBuyEnabled: bool, dipThreshold: number(1-30)}\n\n"
+                f"Bot type x market matrix (single source of truth from broker_market_policy): {dict(BOT_TYPE_MARKETS)}\n"
+                f"{_market_constraint_line}"
                 "Also suggest base config:\n"
-                "- symbol: string (e.g. 'BTC/USDT')\n"
+                f"- marketCategory: 'Crypto'|'USStock'|'Forex' (must match the detected market: '{detected_market or 'Crypto'}')\n"
+                f"- symbol: string (e.g. 'BTC/USDT' for Crypto, 'XAU/USD' or 'EUR/USD' for Forex, 'TSLA' for USStock)\n"
                 "- timeframe: '1m'|'5m'|'15m'|'1h'|'4h'|'1d'\n"
-                "- marketType: 'swap'|'spot'\n"
-                "- leverage: int(1-125, only for swap)\n"
-                "- initialCapital: number (in USDT)\n\n"
+                "- marketType: 'swap'|'spot' (USStock and Forex are always 'spot')\n"
+                "- leverage: int(1-125, only for swap; ignored on spot/USStock/Forex)\n"
+                f"- initialCapital: number (in {_quote_label})\n\n"
                 "Risk config:\n"
                 "- stopLossPct: number(0-100)\n"
                 "- takeProfitPct: number(0-1000)\n"
@@ -1653,7 +1755,7 @@ def ai_generate_strategy():
                 '  "botType": "grid"|"martingale"|"trend"|"dca",\n'
                 '  "botName": "descriptive name",\n'
                 '  "reason": "brief explanation in user\'s language, mention the market analysis",\n'
-                '  "baseConfig": {symbol, timeframe, marketType, leverage, initialCapital},\n'
+                '  "baseConfig": {marketCategory, symbol, timeframe, marketType, leverage, initialCapital},\n'
                 '  "strategyParams": {... type-specific params ...},\n'
                 '  "riskConfig": {stopLossPct, takeProfitPct, maxPosition}\n'
                 "}\n"
@@ -1693,6 +1795,44 @@ def ai_generate_strategy():
             valid_types = ('grid', 'martingale', 'trend', 'dca')
             if result.get('botType') not in valid_types:
                 result['botType'] = 'grid'
+
+            # Cross-check the LLM's botType against the per-market matrix and
+            # downgrade if it picked something incompatible (e.g. 'grid' for
+            # a USStock symbol where overnight gaps blow up grid bots, or
+            # 'martingale' for Forex where margin rules differ). 'dca' is
+            # the universal safe fallback because it works on every market.
+            if detected_market:
+                _allowed_for_mkt = allowed_bot_types(detected_market)
+                if _allowed_for_mkt and result.get('botType') not in _allowed_for_mkt:
+                    fallback = 'dca' if 'dca' in _allowed_for_mkt else sorted(_allowed_for_mkt)[0]
+                    logger.info(
+                        "[AI Bot] Downgrading botType=%s -> %s for market=%s (incompatible)",
+                        result.get('botType'), fallback, detected_market,
+                    )
+                    result['botType'] = fallback
+
+            # Force baseConfig.marketCategory to the detected market so the
+            # frontend wizard's applyAiPreset lights up the correct market
+            # radio + credential filter immediately. If detection failed we
+            # leave whatever the LLM said (or default to Crypto).
+            base_cfg = result.get('baseConfig') if isinstance(result.get('baseConfig'), dict) else {}
+            if detected_market:
+                base_cfg['marketCategory'] = detected_market
+            elif not base_cfg.get('marketCategory'):
+                base_cfg['marketCategory'] = 'Crypto'
+            # USStock and Forex on QuantDinger are always spot; lock it so
+            # the LLM can't accidentally suggest 'swap' which would later
+            # fail broker_market_policy validation.
+            if base_cfg.get('marketCategory') in ('USStock', 'Forex'):
+                base_cfg['marketType'] = 'spot'
+                base_cfg['leverage'] = 1
+            # If we successfully detected the symbol from prompt, prefer the
+            # canonical form over whatever the LLM echoed back (e.g. it
+            # might say 'XAU' instead of the data-source-friendly 'XAU/USD').
+            if detected_symbol:
+                base_cfg['symbol'] = detected_symbol
+            result['baseConfig'] = base_cfg
+
             if result.get('botType') == 'dca':
                 params = result.get('strategyParams') if isinstance(result.get('strategyParams'), dict) else {}
                 freq = str(params.get('frequency') or '').strip().lower()
@@ -1996,14 +2136,13 @@ def get_strategy_logs():
             if msg.startswith('tick price=') or msg.startswith('tick price '):
                 continue
             ts = rr.get('timestamp')
-            if ts is not None and hasattr(ts, 'isoformat'):
-                if getattr(ts, 'tzinfo', None) is not None:
-                    rr['timestamp'] = ts.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
-                else:
-                    rr['timestamp'] = ts.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+            if ts is not None:
+                from app.utils.timeutil import to_utc_iso
+                iso = to_utc_iso(ts)
+                rr['timestamp'] = iso if iso is not None else str(ts)
             out.append(rr)
-        logs = list(reversed(out))
-        return jsonify({'code': 1, 'msg': 'success', 'data': logs})
+        # Already ORDER BY id DESC — newest first for the UI log panel.
+        return jsonify({'code': 1, 'msg': 'success', 'data': out})
     except Exception as e:
         if PgUndefinedTable is not None and isinstance(e, PgUndefinedTable):
             return jsonify({'code': 1, 'msg': 'success', 'data': []})

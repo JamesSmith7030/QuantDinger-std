@@ -33,14 +33,12 @@ DEFAULT_BILLING_CONFIG = {
     # ai_analysis 统一单价：即时分析 / AI过滤 / 定时任务 均按此单价 × 标的数扣费
     'cost_ai_analysis': 10,
     'cost_ai_code_gen': 30,
-    'cost_polymarket_deep_analysis': 15,
 }
 
 # Feature name mapping (for log recording)
 FEATURE_NAMES = {
     'ai_analysis': 'AI Analysis',
     'ai_code_gen': 'AI Code Generation',
-    'polymarket_deep_analysis': 'Polymarket Deep Analysis',
 }
 
 
@@ -227,10 +225,17 @@ class BillingService:
 
                 now = datetime.now(timezone.utc)
 
-                # Read current VIP expiry to support stacking for monthly/yearly.
-                cur.execute("SELECT vip_expires_at FROM qd_users WHERE id = ?", (user_id,))
+                # Read current VIP state to support
+                #   (a) stacking expiry for monthly/yearly,
+                #   (b) lifetime members buying monthly/yearly as a pure
+                #       credit top-up without losing their lifetime status.
+                cur.execute(
+                    "SELECT vip_expires_at, vip_is_lifetime FROM qd_users WHERE id = ?",
+                    (user_id,),
+                )
                 row = cur.fetchone() or {}
                 current_expires = row.get("vip_expires_at")
+                existing_is_lifetime = bool(row.get("vip_is_lifetime") or False)
                 if isinstance(current_expires, str) and current_expires:
                     try:
                         current_expires = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
@@ -241,15 +246,28 @@ class BillingService:
 
                 base_time = current_expires if (current_expires and current_expires > now) else now
 
+                # Lifetime users buying monthly/yearly: keep them lifetime
+                # (skip the VIP-field UPDATE below) but still grant credits.
+                # Operators rely on this so heavy users can top up credits
+                # mid-cycle without "downgrading" themselves to a fixed-term
+                # plan.
+                preserve_lifetime = existing_is_lifetime and plan in ("monthly", "yearly")
+
                 vip_expires_at = None
                 vip_plan = plan
                 vip_is_lifetime = False
 
-                if plan in ("monthly", "yearly"):
+                if preserve_lifetime:
+                    # Keep whatever the lifetime user already has on file.
+                    vip_expires_at = current_expires
+                    vip_plan = "lifetime"
+                    vip_is_lifetime = True
+                elif plan in ("monthly", "yearly"):
                     days = int(plans[plan].get("duration_days") or (30 if plan == "monthly" else 365))
                     vip_expires_at = base_time + timedelta(days=days)
                 else:
-                    # Lifetime: set very long expiry + mark lifetime flag
+                    # Lifetime upgrade (or first lifetime purchase): set very
+                    # long expiry + mark lifetime flag.
                     vip_expires_at = now + timedelta(days=365 * 100)
                     vip_is_lifetime = True
 
@@ -284,27 +302,36 @@ class BillingService:
                     ref = (fulfillment_ref or "").strip()
                     order_ref = ref if ref else f"usdt:{user_id}:{int(now.timestamp())}"
 
-                # Update user VIP fields
-                cur.execute(
-                    """
-                    UPDATE qd_users
-                    SET vip_expires_at = ?,
-                        vip_plan = ?,
-                        vip_is_lifetime = ?,
-                        updated_at = NOW()
-                    WHERE id = ?
-                    """,
-                    (vip_expires_at, vip_plan, bool(vip_is_lifetime), user_id),
-                )
+                # Update user VIP fields — but only when something actually
+                # changes. Lifetime members topping up via monthly/yearly
+                # keep all three VIP columns intact so we don't accidentally
+                # roll back a long expiry or flip the lifetime flag off.
+                if not preserve_lifetime:
+                    cur.execute(
+                        """
+                        UPDATE qd_users
+                        SET vip_expires_at = ?,
+                            vip_plan = ?,
+                            vip_is_lifetime = ?,
+                            updated_at = NOW()
+                        WHERE id = ?
+                        """,
+                        (vip_expires_at, vip_plan, bool(vip_is_lifetime), user_id),
+                    )
 
                 # Credits grants
                 if plan in ("monthly", "yearly"):
                     credits_once = int(plans[plan].get("credits_once") or 0)
                     if credits_once > 0:
+                        remark = (
+                            f"Lifetime top-up via {plan}"
+                            if preserve_lifetime
+                            else f"Membership bonus ({plan})"
+                        )
                         # Use add_credits to update balance and log
                         # NOTE: add_credits opens its own connection, so we do a direct update here for atomicity.
                         self._add_credits_in_tx(cur, user_id, credits_once, action="membership_bonus",
-                                                remark=f"Membership bonus ({plan})", reference_id=order_ref)
+                                                remark=remark, reference_id=order_ref)
                 else:
                     # Lifetime: grant first month's credits immediately and set last grant time
                     monthly_credits = int(plans["lifetime"].get("credits_monthly") or 0)
@@ -320,17 +347,14 @@ class BillingService:
                         # Column may not exist; ignore
                         pass
 
-                # VIP log entry (for audit)
-                cur.execute(
-                    """
-                    INSERT INTO qd_credits_log
-                      (user_id, action, amount, balance_after, remark, operator_id, reference_id, created_at)
-                    VALUES (?, 'membership_purchase', 0,
-                            (SELECT credits FROM qd_users WHERE id = ?),
-                            ?, NULL, ?, NOW())
-                    """,
-                    (user_id, user_id, f"Membership purchased: {plan}", order_ref),
-                )
+                # NOTE: we used to also write a zero-amount `membership_purchase`
+                # audit row here so the credits-log tab showed two rows per
+                # purchase (one "you bought X" + one "you got N credits"). That
+                # was redundant — the actual credit grant above already records
+                # the action with a non-zero amount, and the membership
+                # purchase itself is preserved in qd_membership_orders /
+                # qd_usdt_orders. Dropping the duplicate keeps the user-facing
+                # credits log clean (one row per real balance change).
 
                 db.commit()
                 cur.close()
@@ -464,7 +488,7 @@ class BillingService:
         
         Args:
             user_id: 用户ID
-            feature: 功能名称（ai_analysis / polymarket_deep_analysis）
+            feature: 功能名称（ai_analysis / ai_code_gen）
             reference_id: 关联ID（可选）
         
         Returns:
@@ -727,20 +751,41 @@ class BillingService:
             return {'items': [], 'total': 0, 'page': 1, 'page_size': page_size, 'total_pages': 0}
     
     def get_user_billing_info(self, user_id: int) -> Dict[str, Any]:
-        """获取用户计费与会员信息快照（供前端显示）"""
+        """获取用户计费与会员信息快照（供前端显示）。
+
+        ``is_lifetime`` is exposed so the billing page can render the VIP
+        snapshot as "Lifetime member" (instead of an awkward 100-year
+        expiry date) and so the page can show a hint that lifetime users
+        can still purchase monthly/yearly plans as credit top-ups.
+        """
         credits = self.get_user_credits(user_id)
         is_vip, vip_expires_at = self.get_user_vip_status(user_id)
         config = self.get_billing_config()
-        
+
+        is_lifetime = False
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute(
+                    "SELECT vip_is_lifetime FROM qd_users WHERE id = ?",
+                    (user_id,),
+                )
+                row = cur.fetchone() or {}
+                is_lifetime = bool(row.get("vip_is_lifetime") or False)
+                cur.close()
+        except Exception:
+            # Column may not exist on very old schemas; treat as non-lifetime
+            is_lifetime = False
+
         return {
             'credits': float(credits),
             'is_vip': is_vip,
+            'is_lifetime': is_lifetime,
             'vip_expires_at': vip_expires_at.isoformat() if vip_expires_at else None,
             'billing_enabled': config.get('enabled', False),
             'feature_costs': {
                 'ai_analysis': config.get('cost_ai_analysis', 0),
                 'ai_code_gen': config.get('cost_ai_code_gen', 0),
-                'polymarket_deep_analysis': config.get('cost_polymarket_deep_analysis', 0),
             }
         }
 

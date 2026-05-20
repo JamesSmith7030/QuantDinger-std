@@ -4,6 +4,240 @@ This document records version updates, new features, bug fixes, and database mig
 
 ---
 
+## V3.0.7 (2026-05-13) — 代码瘦身：Polymarket 预测市场模块全量下线（含前端）
+
+历史遗留的 **Polymarket 预测市场** 模块整套下线。本次一次性清干净：删 5 个后端文件（worker / batch analyzer / single analyzer / route / data_source）+ 2 个后端测试 + 2 个前端文件（API 客户端 + 弹框组件）+ 计费项 + 3 张数据表 + AI 分析里那段「相关预测市场」prompt 上下文 + AI 资产分析页面的「预测市场 tab」+ 10 个 locales 文件里所有翻译条目，**共减少 ≈ 160 KB / 5600+ 行**。
+
+### 🧹 Frontend Removed
+
+- **`ai-asset-analysis` 页面里的「预测市场」tab**：整段 `<a-tab-pane key="polymarket">` 删除，下面挂载的 `<PolymarketAnalysisModal>` 一并删除
+- **粘贴 polymarket.com URL 让 AI 单市场分析**的对话框：`components/PolymarketAnalysisModal/index.vue`（24.8 KB）删除 + 配套 API 客户端 `api/polymarket.js` 删除（之前页面打开时 `/api/polymarket/history?page=1&page_size=20` 报 404 就是源自此处）
+- **`PredictionMarket` 市场枚举**：从 `ai-asset-analysis` 卡片样式、`indicator-ide` 自选标的列表 / 颜色映射 / CSS 类中全部移除
+- **AI 交易雷达**轮播卡片里的 PredictionMarket 分支（`is-prediction` 卡片宽 290px 变体 / `rc-prediction-title` 双行截断标题 / 概率+评分+建议三件套指标项 / 相关 CSS）整段删除，统一回归到「价格 / 24h 涨跌 / 信号」三件套
+- **i18n 多语言翻译**：10 个 locales 文件（ar / de / en / fr / ja / ko / th / vi / zh-CN / zh-TW）共 **1087 行** `polymarket.*` / `PredictionMarket` / `predictionmarket` 翻译条目一次性脚本清除，`node --check` 全部语法 OK
+
+### 🧹 Backend Removed
+
+- **后台 LLM worker**：`polymarket_worker.py`（每 30min 调用 OpenAI 批量分析市场）、`polymarket_batch_analyzer.py`、`polymarket_analyzer.py` 全部删除，启动钩子 `start_polymarket_worker()` 移除
+- **API 路由**：`/api/polymarket/*`（含 `/analyze`、`/history`）全部下线，`routes/polymarket.py` 删除 + blueprint 注销
+- **数据源**：`app/data_sources/polymarket.py`（67 KB，CLOB/Gamma API 客户端 + 本地缓存读写）删除
+- **AI 资产分析的 polymarket 上下文段**：`fast_analysis.py` 的 prompt 模板里去掉 `🎯 PREDICTION MARKETS` 段，`market_data_collector.py` 去掉 `include_polymarket` 参数和 `_get_polymarket_events` / `_extract_polymarket_keywords` 私有方法（主分析功能不受影响，只是 prompt 里少一段 30~80 token 的预测市场背景）
+- **计费项**：`billing_service.py` 删除 `cost_polymarket_deep_analysis` 单价、`polymarket_deep_analysis` feature 名映射、`feature_costs` 输出
+- **未消费的孤儿函数**：`data_providers/opportunities.py::analyze_opportunities_polymarket`
+- **测试**：`tests/test_polymarket_slug_lookup.py`、`tests/test_polymarket_url_parsing.py`
+
+### 🗄️ Database
+
+`migrations/init.sql` 删除 3 张相关表的 `CREATE TABLE` 与索引，并加入老库一次性清理迁移（全新部署是 no-op）：
+
+```sql
+DROP TABLE IF EXISTS qd_polymarket_asset_opportunities CASCADE;
+DROP TABLE IF EXISTS qd_polymarket_ai_analysis CASCADE;
+DROP TABLE IF EXISTS qd_polymarket_markets CASCADE;
+```
+
+### ⚠️ Upgrade Notes
+
+- **不需要任何手动迁移**：重启后端时 `init_database()` 会自动跑 init.sql，三张 `qd_polymarket_*` 表会被自动清理；如果你之前没有这三张表（新库），DROP 语句是空操作
+- **前端缓存**：升级后请用户硬刷一次（Ctrl+Shift+R）清掉 `chunk-vendors.*.js` 旧 bundle，否则浏览器加载缓存的旧 JS 还会去请求 `/api/polymarket/history` 报 404
+- **AI 分析效果**：原本 prompt 末尾「相关预测市场事件」段被去掉。该段对最终决策影响很弱（多数标的根本搜不到对应预测市场，且预测市场≠基本面），删除后 LLM 调用平均省 30-80 token，速度略增
+- **AI 交易雷达**：后端 `trading_opportunities` 接口不再返回 `market: 'PredictionMarket'` 的卡片（孤儿扫描器已删），前端轮播只剩股票 / 加密 / 外汇三类机会
+- **第三方 Adanos 情绪 API 的 `polymarket` 情绪源不受影响** —— 那是 Adanos 提供的舆情数据通道，跟本次下线的 Polymarket 模块是完全独立的两件事，保留
+
+### 💡 Why
+
+后台 LLM 持续在跑但无任何用户出口 = 纯成本：DB 行数、OpenAI token、Python 内存、日志噪声都在白白增长。trim 掉之后，启动日志安静 / 后台线程数 -1 / OpenAI 月账单 -X / DB 体积 -Y（具体取决于历史数据量）。
+
+---
+
+## V3.0.6 (2026-05-13) — USDT 支付重写：单地址 + 金额尾数 + 四链（TRC20 / BEP20 / ERC20 / SOL）
+
+本版只动了一处但动得很彻底：**USDT 收款系统**。原先是每张订单派生一个独立 TRC20 地址（xpub HD 派生），上线后两个痛点暴露得很猛 —— **(1)** 几十个派生地址的资金归集要逐个发 TRC20 转账，每次烧掉的 Energy/Bandwidth 折合 ≈ 1.5 USDT/笔，月度归集成本 = 订单数 × 1.5 USDT；**(2)** 派生地址只能 TRC20，跨链扩展（用户喊了很久要 BSC / ETH / SOL）改造工作量巨大。本版用「**单地址 + 金额尾数识别**」一次性解了这两个坑，并顺手把链扩展到 4 条。
+
+### 🚀 New Features
+
+#### USDT 支付：单地址 + 金额尾数模型（替换原 xpub 派生）
+核心想法很简单 —— **不再为每张订单造新地址，所有人都付到同一个主钱包地址；订单的唯一身份藏在「金额尾数」里**。比如基础价 $19.9 的月卡，订单 #A 算出来要付 19.901234 USDT，订单 #B 要付 19.905678 USDT，两笔都到主钱包后我们通过尾数把它们认回原订单：
+- **零归集成本**：钱直接进主钱包，再也不需要扫描数十个派生地址做归集转账
+- **额外成本 ≤ 0.01 USDT/单**：尾数最大被夹到 0.01 USDT 以内（默认 6 位精度，slot 空间 10000+），用户视觉上「就是普通付款」
+- **碰撞防御**：`qd_usdt_orders` 上的 `UNIQUE(chain, amount_usdt) WHERE status IN ('pending','paid')` 偏序唯一索引保证活动订单不会撞到同金额；INSERT 触发碰撞时自动重试不同 seed（默认 10 次）
+- **环境变量**：`USDT_AMOUNT_SUFFIX_DECIMALS=6`（建议默认）
+
+#### 4 条链一次性全开：TRC20 / BEP20 / ERC20 / SOL
+每条链只需一行环境变量，未配置的链前端自动隐藏：
+- `USDT_TRC20_ADDRESS=Txxx...`、`USDT_BEP20_ADDRESS=0x...`、`USDT_ERC20_ADDRESS=0x...`、`USDT_SOL_ADDRESS=base58...`
+- 总开关 `USDT_PAY_ENABLED_CHAINS=TRC20,BEP20,ERC20,SOL`（任一项不在白名单内的链下单时被拒）
+- 新增 `GET /api/billing/usdt/chains`：返回当前实际可用的链列表（带 `recommended` 徽标 + 典型手续费），UI 据此渲染选择器
+- 推荐链：**BSC（≈$0.30/笔）+ Solana（≈$0.0005/笔）** —— 比 TRC20 还省钱
+
+#### 钱包深链 URI 二维码（imToken / MetaMask / TokenPocket / Phantom 一扫即填金额）
+每条链生成对应协议的标准 URI 并把它编进二维码，主流钱包扫码后会自动把地址+金额都填好，用户不用手输：
+- **EVM (BEP20/ERC20)**：`ethereum:<contract>@<chain_id>/transfer?address=<recipient>&uint256=<raw>` (EIP-681)
+- **Solana**：`solana:<recipient>?amount=...&spl-token=<mint>&label=...&message=...` (Solana Pay)
+- **TRON**：`tron:<recipient>?asset=USDT&amount=<human>` (TP / imToken 支持，旧版 TronLink 退化为读地址)
+- 钱包不识别 URI 时退化为「读地址 + 用户手动填金额」 —— 此时金额复制按钮 + 高亮尾数让用户不会少付
+
+#### 订单页 UI 改造
+- 选链 modal：列出每条链 + 典型手续费 + 推荐徽标 + 一键继续
+- 支付 modal：二维码大字号显示金额，**末几位尾数高亮成红色**（用户最容易漏看的部分），一键复制金额/地址
+- 钱包兼容性 tooltip：根据链类型给出钱包扫码兼容性提示
+- 没配置任何链时弹「请联系管理员配置 USDT_*_ADDRESS」的指引，而不是 500
+
+### 🛠️ 工程改进
+
+#### 后端 `app/services/usdt_payment/` 包重构
+原 830 行单文件 `usdt_payment_service.py` 拆为分层包：
+- `chains.py`：链元数据 / URI 构造 / 金额尾数生成（纯函数，100% 单测覆盖）
+- `watchers/`：`tron.py` (TronGrid) / `evm.py` (Etherscan + BscScan 同 endpoint) / `solana.py` (官方 RPC，`getSignaturesForAddress` + `getTransaction` 解析 SPL `preTokenBalances`/`postTokenBalances`)
+- `service.py`：订单创建 + 入账匹配 + worker
+- 旧路径 `app.services.usdt_payment_service` 保留为 shim，所有现有 import 兼容
+
+#### Watcher 通用约定
+四条链共用同一接口 `find_incoming(address, amount, created_at) -> (IncomingTransfer | None, debug_note)`。**精确金额匹配**（±1 微单位容忍 wallets 的尾零截断）是匹配方案 A 的关键 —— 不再像旧版那样接受过付为匹配，否则尾数识别会失效。
+
+#### DB Schema 演进（向后兼容 + 一次性自愈）
+`migrations/init.sql` 中的 `qd_usdt_orders` 表加 4 列（`currency` / `amount_suffix` / `payment_uri` / `matched_via`）+ 偏序唯一索引；老库通过 `DO $$ ... ALTER TABLE ADD COLUMN IF NOT EXISTS ...` 自愈，不需要任何停机/手工迁移命令。`address_index` 列保留不删，老订单可继续查看。
+
+#### 15 个新单测 + 130/130 全套绿
+- `tests/test_usdt_payment_chains.py`：金额尾数精度 / 重试发散 / URI 构造（4 条链每条断言独立）/ 链选择器 env 解析（缺地址自动隐藏）
+
+### 🐛 修复与清理
+- **删除 xpub HD 派生路径**：`bip_utils` 依赖在 USDT 域已无引用（其他场景仍用），新订单完全不走派生
+- **TRC20 USDT 合约硬编码地址修正**：之前 `env.example` 默认值 `TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj` 是一个无效占位地址（TronGrid 永远返回空 result），改成 TRC20 USDT 官方合约 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
+
+### 🐞 上线后 hotfix（v3.0.6 内）
+
+实战截图发现两个真实痛点，**同版本内**修复：
+
+1. **金额总小数位漂移**（`19.9 → 19.90670000` 八位）
+   `qd_usdt_orders.amount_usdt` 列宽 `NUMERIC(20,8)`，比 `USDT_AMOUNT_SUFFIX_DECIMALS=6` 宽 2 位。`Decimal('19.901234')` 量化到 6 位写入后，Postgres 回填成 `19.90123400`（DB 列宽决定的零填充），前端拆字符串就出来 `19.90 + 123400` 的 8 位显示，与第一次创单时返回的 6 位 `19.901234` 不一致。
+   - 新增 `chains.format_amount_display()`：统一在 API 出口量化到 `suffix_decimals()` 位
+   - `_row_to_dict` / `create_order` 返回值 / `build_payment_uri` 的 URI 金额段全部走这层，前后端永远见到一致的 6 位小数
+   - DB 列宽保留 `(20,8)` 作为未来扩展 `USDT_AMOUNT_SUFFIX_DECIMALS=8` 的余量，不做 schema 迁移
+2. **关闭支付窗口再打开 = 报错**
+   原实现每次点「立即购买」都创建新订单，老 pending 订单留在 DB 里没人管，前端再次开窗时如果偶发后端慢会让用户看到 toast 报错。
+   - `create_order` 加幂等性：先查 `(user_id, plan, chain, status='pending', expires_at > now)` 的活跃订单，存在就**复用同一条**返回（同样金额、同样地址、同样剩余过期时间），不创建新行
+   - 返回结构加 `reused: bool` 字段；前端 confirmChain 看到 `reused=true` 弹一行轻量 toast「检测到您还有一笔未支付订单，已为您继续展示」
+   - 4 个新单测（`test_usdt_payment_idempotency.py`）覆盖：同请求复用 / 不同链不复用 / 不同用户不复用 / 已过期订单不阻塞新建
+
+### 📋 升级须知
+1. **重启即可**：DB schema 自治迁移已合入 `init.sql`，不需要手工跑 SQL
+2. **配 env 才生效**：把 `USDT_TRC20_ADDRESS=` 等四个变量改成你的主钱包地址；空着的链前端自动隐藏，不会出现在用户的选项里
+3. **API Key 可选但强烈建议**：Etherscan / BscScan 不配 Key 时走匿名通道（200 次/天），少量订单可用；Solana 默认走官方公开 RPC（足够小流量），高流量建议换 Helius / QuickNode 私有 RPC（`SOLANA_RPC_URL`）
+4. **TRON 合约地址默认值变更**：升级后请用 `env.example` 里的新默认 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`，旧 `.env` 里如果显式配了无效占位务必更新
+
+### 📂 关键文件
+| 文件 | 用途 |
+|---|---|
+| `backend_api_python/app/services/usdt_payment/chains.py` | 4 条链元数据 / URI 构造 / 金额尾数 |
+| `backend_api_python/app/services/usdt_payment/watchers/*.py` | 4 条链入账扫描器 |
+| `backend_api_python/app/services/usdt_payment/service.py` | 订单流程 + worker |
+| `backend_api_python/app/services/usdt_payment_service.py` | 向后兼容 shim |
+| `backend_api_python/migrations/init.sql` | `qd_usdt_orders` 新列 + 偏序唯一索引 + 自愈 migration |
+| `backend_api_python/env.example` | 新 env 变量（4 链地址 / 浏览器 Key / 尾数精度） |
+| `backend_api_python/app/routes/billing.py` | 新增 `/usdt/chains`，`/usdt/create` 接收 `chain` 参数 |
+| `QuantDinger-Vue-src/src/views/billing/index.vue` | 选链 modal + URI 二维码 + 尾数高亮 |
+| `QuantDinger-Vue-src/src/api/billing.js` | `listUsdtChains()` / `createUsdtOrder(plan, chain)` |
+| `backend_api_python/tests/test_usdt_payment_chains.py` | 15 个新单测 |
+
+---
+
+## V3.0.5 (2026-05-13) — Alpaca / Smart Tuning v2 / IS-OOS 双面板 / 经纪商统一面板 / DB 启动自愈
+
+本版合并了过去两周累积的「让回测更科学、让多券商管理更顺手、让本地部署更不容易踩坑」的改动。其中**回测科学性**是这次最值得说的事——之前智能调参在训练段（IS）上给出 +36% 头条数字，用户把参数应用回完整窗口跑出 -24%，这种沉默过拟合是本次重点修复对象。同时新增 **Alpaca Markets** 作为第三家「传统经纪商」适配器，与 IBKR / MT5 平级。
+
+### 🚀 New Features
+
+#### Alpaca Markets 适配器（美股 / ETF / 加密货币 · paper + live）
+作为第三种「传统经纪商」并入 QuantDinger，与 IBKR / MT5 平级（来源 [PR #101](https://github.com/brokermr810/QuantDinger/pull/101)）：
+- **覆盖**：US 股票、ETF、加密货币现货；纸面 (`paper-api.alpaca.markets`) 和真实 (`api.alpaca.markets`) 账户均可
+- **adapter**：`backend_api_python/app/services/alpaca_trading/`（client / symbols / 错误规范化 / OHLCV）
+- **路由**：`/api/alpaca/connect|status|account|positions|orders|symbols`
+- **多租户**：与 IBKR 一起接入新的 `BrokerSessionRegistry`，每个用户独立 client，不再共享全局连接
+- **零 referral 干扰**：审过整个适配器代码，无 referral / partner code 类隐藏标识
+
+#### 统一经纪商账户页面（`/broker-accounts`）
+原先 IBKR / MT5 / Alpaca / 加密货币交易所的连接入口散落在不同位置，现合并为一个统一管理页：
+- 头部摘要 + Alpaca / IBKR / MT5 三个 panel（连接表单 + 账户 KPI + 持仓表 + 挂单表 + 一键撤单）
+- 加密货币交易所凭据作为一张独立卡片列出，复用现有 `ExchangeAccountModal`
+- 前端通过 `src/api/broker.js` 统一各家不一致的端点结构
+
+#### 智能调参 v2（Smart Tuning）—— 多参数策略真正可用
+之前的「智能调参」实际只扫止盈 / 止损 / 杠杆 3 个维度，RSI / MACD / EMA / ATR 这种多参数策略基本无法调参。本版把它做成真正的多维寻优：
+- **P1 · 自动推断 sweep 范围**：指标里写 `# @param rsi_len int 14 RSI period` 就够，不用手写 `range=`，前端基于 default × `[0.5, 0.75, 1, 1.25, 1.75]` 自动生成扫参网格（int 类型自动取整、去重）
+- **P2 ·「可调维度」面板**：在结构化调参卡片里一目了然列出所有维度（带 risk / position / leverage / `@param` declared / `@param` inferred 五色徽标），实时显示完整笛卡尔积大小与候选预算，每个维度都可勾选取消
+- **P3 · 维度爆炸自动切 DE**：完整笛卡尔积 > 候选预算 × 10 时（默认 480），grid 自动切换到 Differential Evolution，避免「扫了等于没扫」，UI 显示蓝色提示「已自动切换到 DE」
+- **P4 · trailing 维度自动加入**：策略 `@strategy trailingEnabled=true` 时，自动追加 `trailing.pct` 和 `trailing.activationPct` 两个扫参维度
+
+#### IS-OOS 双面板 + 应用按钮分流
+解决了一个长期沉默的过拟合陷阱（智能调参在 70% 训练段上给 +36% 头条数字，应用到完整窗口含 30% 验证段后跑出 -24%，但 UI 上完全看不出来）：
+- **最佳候选卡片** 改成 IS / OOS 并排展示，红框警示「OOS 退化 X%，疑似过拟合」
+- **原来的「应用最佳参数」按钮拆成三个动作**：
+  - 应用并在训练段验证（复现 +36% 头条数字）
+  - 应用并在完整窗口跑（含 OOS 段，看真实表现）
+  - 只应用参数（不立即跑回测）
+- 后端 `ExperimentRunnerService._build_best_output` 暴露 `oosSummary` / `oosScore` / `oosDegradation` / `oosOverfit` 给前端
+
+#### Crypto 行情时间框架后端 resample
+当交易所原生不提供某个时间框架（如 OKX 没有 30m）时，后端自动取更细粒度的 OHLCV 数据并按交易所对齐 resample。前端无需关心，13 个新单测覆盖（来源 [PR #104](https://github.com/brokermr810/QuantDinger/pull/104)）。
+
+### 🛠️ 工程改进
+
+#### 数据库启动自治（解决「本地 PG 部署 `relation does not exist` / `权限不够` 满屏」）
+之前本地 PostgreSQL（非 docker）部署必须手工 `psql -f migrations/init.sql` 才能建表，否则 worker 起来满屏 `relation "pending_orders" does not exist` / `qd_strategy_positions 权限不够`；docker 部署不会踩这个坑（容器 entrypoint 自动跑 init.sql）。现在：
+- `init_database()` 每次启动**自动 apply** `migrations/init.sql`（全幂等 `CREATE TABLE IF NOT EXISTS`，docker 二次跑无害）
+- 启动后做一次轻量**权限自检**：对 `qd_users` / `pending_orders` / `qd_strategy_positions` / `qd_strategies_trading` / `qd_analysis_memory` 五个关键表跑 `SELECT 1 LIMIT 0`，任何 `InsufficientPrivilege` 失败立刻打头条 banner 给出 `ALTER TABLE OWNER` 修复配方，而不是让权限错误淹在每秒的 worker 日志里
+- 新 env: `SKIP_AUTO_MIGRATE=true` 作为外部 schema 管理（Flyway / Liquibase / DBA 手工）的逃生口
+
+#### 多租户经纪商会话（`BrokerSessionRegistry`）
+`backend_api_python/app/utils/broker_session.py` 提供按 `(user_id, broker_name)` 缓存的 client 注册表，加 `threading.Lock` 保护。把原本 IBKR / Alpaca 共用全局 `_client` 改为按用户隔离，避免「一个用户重连把所有用户踢下线」。
+
+#### OAuth `FRONTEND_URL` 支持多前端
+`backend_api_python/app/services/oauth_service.py` 现在把 `FRONTEND_URL` 解析为逗号分隔列表：第一个作为默认登录后重定向 origin，全部作为 OAuth 重定向白名单。便于一套后端同时给 `ai.quantdinger.com` + `m.quantdinger.com` 两个域提供服务。
+
+#### 默认指标精简 + SuperTrend 示例国际化
+新用户注册原本默认塞 4 个内置指标，现简化为 **1 个高质量 SuperTrend 示例**：全英文注释 + `@param` 范围标注 + Wilder ATR 平滑、路径依赖 SuperTrend 计算的标准实现，开箱即跑且展示推荐的多参数策略写法。
+
+### 🐛 Bug 修复
+
+- **指标市场综合评分全为 0**（V3.0.4，已合并入本版）：`community_service.py` 读字段拼错（`'overall'` 实际字段是 `'overallScore'`），所有上架策略综合分都显示 0；4 个回归测试补齐
+- **风险-收益分布坐标轴单位错误**：散点图坐标轴单位把已经是百分比的 `totalReturn` / `maxDrawdown` 再乘 100，显示为「百分之好几千」，已修
+- **`runBacktest` 时间窗口覆盖**：方法签名加入 `options.dateRangeOverride`，允许「应用并在训练段验证」这种行为复用完整 `runBacktest` 路径
+- **i18n key 漏写**：调参维度面板部分 label 直接显示 `indicatorIde.stopLossPct` 而不是「止损 (%)」—— 补齐 4 个缺失 key × 10 locale (`stopLossPct` / `takeProfitPct` / `trailingStopPct` / `trailingActivationPct`)，并把 label 解析改用 `$te()`（translation exists 检查）防御未来再有遗漏
+- **Smart Tuning 12 个 IS/OOS 相关 i18n key** 同步铺到 10 个 locale
+
+### ⚙️ 配置变化
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `SKIP_AUTO_MIGRATE` | `false` | 启动时不自动 apply `migrations/init.sql`（外部 schema 管理时设 true） |
+| `FRONTEND_URL` | `http://localhost:8080` | 现支持逗号分隔多个 origin，全部进 OAuth 白名单；第一个作默认重定向 |
+
+### ✅ 测试
+
+新增 14 个回归测试，全套 **115/115 通过**：
+- `tests/test_db_bootstrap.py` —— 6 个（auto-migrate 幂等 / `init.sql` 缺失兜底 / SQL 失败不崩 / `_verify_table_access` 全绿 / 多个权限失败汇总 banner / `SKIP_AUTO_MIGRATE` 逃生口）
+- `tests/test_experiment_services.py::test_evolution_sweeps_indicator_level_params` —— 1 个（确认 `indicator_params.atr_period` 路径走通 snapshot + overrides）
+- `tests/test_experiment_best_output.py` —— 3 个（OOS metrics surfacing：`oosSummary` / `oosScore` / `oosDegradation` / `oosOverfit`）
+- `tests/test_market_indicator_score.py` —— 4 个（综合评分 `'overall'` → `'overallScore'` 拼写错误回归）
+
+ESLint 对所有触及的 `.vue` / `.js` 文件全绿。
+
+### 📦 兼容性 / 升级建议
+
+- **零破坏性升级**：所有 backend 路由、env 变量、数据库表 schema 全部向后兼容
+- **数据库**：首次启动会自动 apply `migrations/init.sql`；如果你的 PG 用户不是表 owner，启动日志里会出 banner 指引你跑一次 `ALTER TABLE ... OWNER TO <user>;` 一键修好
+- **前端**：需要 build `QuantDinger-Vue-src` 并替换 `frontend/dist`（仓库内 `frontend/dist` 已经包含本次构建产物）
+- **Alpaca**：需要在生产 `requirements.txt` 加 `alpaca-py>=0.30.0`，或本地 `pip install alpaca-py`（已在 `backend_api_python/requirements.txt` 中加好）
+
+### 🗂️ 文件改动概览
+
+- 后端：`app/services/alpaca_trading/*`、`app/routes/alpaca.py`、`app/services/experiment/runner.py`、`app/services/builtin_indicators.py`、`app/services/oauth_service.py`、`app/utils/db.py`、`app/utils/broker_session.py`、`app/services/community_service.py`
+- 前端：`src/views/indicator-ide/index.vue`、`src/views/broker-accounts/*`、`src/api/broker.js`、`src/locales/lang/*.js`（10 个 locale + 16 个新 key）
+- 文档：`README.md` + 6 个 `docs/README_*.md`（badge → 3.0.5 / 加入 Alpaca）、`env.example`（新 `SKIP_AUTO_MIGRATE`）
+
+---
+
 ## V3.1.0 (2026-05-02) — AI Agent Gateway / MCP HTTP / SSE 进度流 / Admin UI
 
 把 QuantDinger 从「只服务人类用户的 Web 产品」扩展成「同时面向人类和 AI Agent 的两栈产品」。给 OpenClaw / NanoBot / Claude Code / Cursor / Codex 这类 Agent 运行时配齐了：受控的 HTTP 网关、按 Scope 的细粒度授权、异步任务 + 实时进度、MCP 接入、Admin 后台运维面板，以及一份机器可读的契约（OpenAPI 3.0）。**所有 Agent 入口默认拒绝实盘交易**——T 类（Trading）即便给到 Agent，也走纸面订单簿，需要管理员显式开启服务器级开关后才可能走真实交易所。

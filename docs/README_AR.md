@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;" dir="ltr">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/v/release/brokermr810/QuantDinger?style=flat-square&color=orange&label=Version" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -63,7 +63,7 @@
 
 ---
 
-> QuantDinger منصة كمّية **ذاتية الاستضافة وتفضّل المحلي** تجمع **البحث المدعوم بالذكاء الاصطناعي** و**استراتيجيات بايثون الأصلية** و**الاختبار الرجعي** و**التداول المباشر** (عملات مشفّرة، أسهم أمريكية عبر IBKR، فوركس عبر MT5) في **منتج واحد**.
+> QuantDinger منصة كمّية **ذاتية الاستضافة وتفضّل المحلي** تجمع **البحث المدعوم بالذكاء الاصطناعي** و**استراتيجيات بايثون الأصلية** و**الاختبار الرجعي** و**التداول المباشر** (عملات مشفّرة، أسهم أمريكية عبر IBKR، فوركس عبر MT5، أسهم / ETF / عملات مشفّرة عبر Alpaca) في **منتج واحد**.
 
 </div>
 
@@ -76,7 +76,7 @@
 
 ## بدء سريع
 
-**المتطلبات:** [Docker](https://docs.docker.com/get-docker/) + Compose و**Git**. **لا حاجة لـ Node.js** (واجهة ويب مُجمَّعة مسبقًا في `frontend/dist`).
+**المتطلبات:** [Docker](https://docs.docker.com/get-docker/) + Compose و**Git**. **لا حاجة لـ Node.js** (واجهة ويب مُجمَّعة مسبقًا في GHCR).
 
 ### macOS / Linux
 
@@ -122,7 +122,7 @@ docker-compose up -d --build
 | المستودع | المحتوى |
 |----------|---------|
 | **[QuantDinger](https://github.com/brokermr810/QuantDinger)** (هذا المستودع) | الخلفية، Compose، الوثائق، ويب مُجمَّع |
-| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **مصدر الويب** (Vue) — `npm run build` ثم استبدل `frontend/dist` |
+| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **مصدر الويب** (Vue) — وسم `v*` ينشر تلقائيًا `ghcr.io/brokermr810/quantdinger-frontend` |
 | **[QuantDinger-Mobile](https://github.com/brokermr810/QuantDinger-Mobile)** | **عميل الجوال** (مفتوح المصدر) |
 
 </div>
@@ -133,6 +133,7 @@ docker-compose up -d --build
 
 لـ **Cursor / Claude Code / Codex**: **Model Context Protocol (MCP)** و**Agent Gateway** (`/api/agent/v1`). التفاصيل الكاملة بالإنجليزية هي المصدر الأساسي:
 
+- **دليل التوصيل:** [**MCP_SETUP.md**](agent/MCP_SETUP.md) — مستضاف / ذاتي الاستضافة، stdio محلي، HTTP عن بُعد، Claude Code CLI، كله في صفحة واحدة.
 - [AGENT_QUICKSTART.md](agent/AGENT_QUICKSTART.md) · [AI_INTEGRATION_DESIGN.md](agent/AI_INTEGRATION_DESIGN.md) · [agent-openapi.json](agent/agent-openapi.json)
 - خادم MCP: [`../mcp_server/README.md`](../mcp_server/README.md) · PyPI [`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)
 
@@ -140,7 +141,7 @@ docker-compose up -d --build
 
 ## نظرة عامة على المنتج
 
-بيئة موحّدة **للذكاء الاصطناعي + استراتيجيات بايثون + اختبار رجعي + تداول مباشر** قابلة للاستضافة الذاتية. تُدار الاعتمادات عبر **PostgreSQL** و**`.env`**. تُربط البورصات وIBKR وMT5 ونماذج اللغة عبر متغيرات البيئة.
+بيئة موحّدة **للذكاء الاصطناعي + استراتيجيات بايثون + اختبار رجعي + تداول مباشر** قابلة للاستضافة الذاتية. تُدار الاعتمادات عبر **PostgreSQL** و**`.env`**. تُربط البورصات وIBKR وMT5 وAlpaca ونماذج اللغة عبر متغيرات البيئة.
 
 ## جولة بصرية
 
@@ -165,10 +166,10 @@ docker-compose up -d --build
 
 ## أبرز الميزات
 
-- **البحث والذكاء الاصطناعي** — تحليل متعدد نماذج اللغة، قوائم المراقبة، السجل؛ NL→كود؛ سير عمل Polymarket؛ تكامل **Agent / MCP**.
+- **البحث والذكاء الاصطناعي** — تحليل متعدد نماذج اللغة، قوائم المراقبة، السجل؛ NL→كود؛ تكامل **Agent / MCP**.
 - **البناء** — `IndicatorStrategy` و`ScriptStrategy` (`on_bar`)؛ واجهة شموع احترافية.
 - **التحقق** — اختبار رجعي على الخادم، منحنى رأس المال.
-- **التشغيل** — تنفيذ عملات مشفّرة، تداول سريع، IBKR / MT5؛ Telegram وبريد وDiscord وWebhook وغيرها.
+- **التشغيل** — تنفيذ عملات مشفّرة، تداول سريع، IBKR / MT5 / Alpaca (أسهم · ETF · عملات مشفّرة)؛ Telegram وبريد وDiscord وWebhook وغيرها.
 - **المنصة** — Docker Compose، Postgres، Redis، OAuth، متعدد المستخدمين، أرصدة/عضوية/USDT.
 
 ## البنية
@@ -199,7 +200,7 @@ flowchart LR
     subgraph EXT[خارجي]
         LLM[LLM]
         EXCH[بورصة]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -222,6 +223,14 @@ flowchart LR
 1. استنسخ المستودع ثم `cp backend_api_python/env.example backend_api_python/.env`
 2. **يجب تعيين `SECRET_KEY`** (القيمة الافتراضية تمنع تشغيل الخلفية). Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **بديل (بدون استنساخ المستودع)**: اسحب صور backend + frontend الجاهزة المتعددة المعماريات (amd64/arm64) من GHCR مباشرة:
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     الصور الافتراضية: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. لتثبيت إصدار محدد اضبط `IMAGE_TAG=v3.0.9` في ملف `.env` محلي (أو `BACKEND_TAG` / `FRONTEND_TAG` لتجاوز جانب واحد فقط).
+   - **التطوير المحلي للواجهة**: استنسخ `QuantDinger-Vue` إلى `./QuantDinger-Vue/` (مُتجاهَل من Git) وشغّل `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`. التفاصيل في [README الإنجليزي](../README.md#alternative-build-the-frontend-from-vue-source).
 4. **الويب:** `http://localhost:8888` · **صحة API:** `http://localhost:5000/api/health`
 5. غيّر كلمة مرور المسؤول الافتراضية قبل الإنتاج. اضبط **`FRONTEND_URL`** في `backend_api_python/.env` على عنوانك الفعلي.
 
@@ -243,7 +252,7 @@ flowchart LR
 
 **هل يمكن الاستضافة الذاتية حقًا؟** نعم، عبر Docker Compose على بنيتك.
 
-**هل للعملات المشفّرة فقط؟** لا. يدعم IBKR (أسهم أمريكية)، MT5 (فوركس)، وPolymarket للبحث.
+**هل للعملات المشفّرة فقط؟** لا. يدعم IBKR / Alpaca (أسهم · ETF · عملات مشفّرة) وMT5 (فوركس).
 
 **هل يمكن كتابة استراتيجيات بايثون؟** نعم، `IndicatorStrategy` و`ScriptStrategy`.
 
