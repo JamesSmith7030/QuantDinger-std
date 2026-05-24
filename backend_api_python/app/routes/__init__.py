@@ -19,6 +19,7 @@ def register_routes(app: Flask):
     from app.routes.settings import settings_bp
     from app.routes.portfolio import portfolio_bp
     from app.routes.ibkr import ibkr_bp
+    from app.routes.alpaca import alpaca_bp
     from app.routes.mt5 import mt5_bp
     from app.routes.user import user_bp
     from app.routes.global_market import global_market_bp
@@ -26,8 +27,8 @@ def register_routes(app: Flask):
     from app.routes.fast_analysis import fast_analysis_bp
     from app.routes.billing import billing_bp
     from app.routes.quick_trade import quick_trade_bp
-    from app.routes.polymarket import polymarket_bp
     from app.routes.experiment import experiment_bp
+    from app.routes.policy import policy_bp
     
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp, url_prefix='/api/auth')   # Auth routes
@@ -43,11 +44,17 @@ def register_routes(app: Flask):
     app.register_blueprint(settings_bp, url_prefix='/api/settings')
     app.register_blueprint(portfolio_bp, url_prefix='/api/portfolio')
     app.register_blueprint(ibkr_bp, url_prefix='/api/ibkr')
+    app.register_blueprint(alpaca_bp, url_prefix='/api/alpaca')
     app.register_blueprint(mt5_bp, url_prefix='/api/mt5')
     app.register_blueprint(global_market_bp, url_prefix='/api/global-market')
     app.register_blueprint(community_bp, url_prefix='/api/community')
     app.register_blueprint(fast_analysis_bp, url_prefix='/api/fast-analysis')
     app.register_blueprint(billing_bp, url_prefix='/api/billing')
     app.register_blueprint(quick_trade_bp, url_prefix='/api/quick-trade')
-    app.register_blueprint(polymarket_bp, url_prefix='/api/polymarket')
     app.register_blueprint(experiment_bp, url_prefix='/api/experiment')
+    app.register_blueprint(policy_bp, url_prefix='/api/policy')
+
+    # Agent Gateway (/api/agent/v1) — versioned, scoped surface for AI agents.
+    # See docs/agent/AI_INTEGRATION_DESIGN.md.
+    from app.routes.agent_v1 import register as register_agent_v1
+    register_agent_v1(app)

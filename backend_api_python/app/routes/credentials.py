@@ -160,12 +160,40 @@ def create_credential():
         config = {'exchange_id': exchange_id}
         hint = ''
 
-        if exchange_id == 'ibkr':
+        if exchange_id == 'alpaca':
+            # Alpaca: REST-only broker (no local terminal). Paper/live is decided
+            # by the API key prefix at runtime — PK* hits paper-api.alpaca.markets,
+            # AK* hits api.alpaca.markets. We deliberately do NOT expose a paper
+            # toggle in the UI: the user provides whichever key matches the env
+            # they want to trade in, and factory.create_alpaca_client routes
+            # automatically. base_url is still accepted as an explicit override
+            # (rare — only useful behind a corporate proxy or for unit tests).
+            api_key = (data.get('api_key') or data.get('apiKey') or '').strip()
+            secret_key = (data.get('secret_key') or data.get('secretKey') or '').strip()
+            if not api_key or not secret_key:
+                return jsonify({'code': 0, 'msg': 'Missing api_key/secret_key', 'data': None}), 400
+
+            config.update({
+                'api_key': api_key,
+                'secret_key': secret_key,
+                'base_url': (data.get('base_url') or data.get('baseUrl') or '').strip(),
+            })
+            # Surface the inferred env in the hint so the credential list still
+            # tells users at a glance whether this key targets paper or live.
+            env_tag = 'paper' if api_key.upper().startswith('PK') else 'live'
+            hint = f"{_api_key_hint(api_key)} ({env_tag})"
+        elif exchange_id == 'ibkr':
             # Interactive Brokers (US stocks)
+            # clientId must differ from manual /api/ibkr/connect (defaults to 1) or TWS drops one session.
+            _ib_cid = data.get('ibkr_client_id')
+            try:
+                ibkr_client_id = int(_ib_cid) if _ib_cid not in (None, '') else 7
+            except (TypeError, ValueError):
+                ibkr_client_id = 7
             config.update({
                 'ibkr_host': (data.get('ibkr_host') or '127.0.0.1').strip(),
                 'ibkr_port': int(data.get('ibkr_port') or 7497),
-                'ibkr_client_id': int(data.get('ibkr_client_id') or 1),
+                'ibkr_client_id': ibkr_client_id,
                 'ibkr_account': (data.get('ibkr_account') or '').strip()
             })
             hint = f"{config['ibkr_host']}:{config['ibkr_port']}"

@@ -70,14 +70,21 @@ class BacktestService:
         '1H': 3600, '4H': 14400, '1D': 86400, '1W': 604800
     }
     
-    # Multi-timeframe backtest threshold configuration
-    # 1m backtest: max 15 days (~21,600 candles) - reduced for performance
-    # 5m backtest: max 1 year (~105,120 candles)
+    # Multi-timeframe backtest threshold configuration.
+    # We pick the finest execution timeframe whose total candle count stays
+    # within ~25k bars — that's the empirical sweet spot where:
+    #   * CCXT paginated fetches stay under ~90 batches (well within budget),
+    #   * the simulation loop completes in single-digit seconds,
+    #   * the JSON response stays well under the frontend's 10-minute timeout.
+    # If the user's date range exceeds the highest tier, we silently fall back
+    # to a standard single-timeframe backtest (see `run_multi_timeframe`).
     MTF_CONFIG = {
-        'max_1m_days': 15,        # Max days for 1-minute backtest (reduced from 30 for performance)
-        'max_5m_days': 365,       # Max days for 5-minute backtest
-        'default_exec_tf': '1m',  # Default execution timeframe
-        'fallback_exec_tf': '5m', # Fallback execution timeframe
+        'max_1m_days': 15,         # 1m: 15d × 1440 = 21,600 candles
+        'max_5m_days': 90,         # 5m: 90d × 288 = 25,920 candles (~86 CCXT calls)
+        'max_15m_days': 240,       # 15m: 240d × 96 = 23,040 candles (~77 CCXT calls)
+        'max_30m_days': 540,       # 30m: 540d × 48 = 25,920 candles (~86 CCXT calls)
+        'default_exec_tf': '1m',   # Default execution timeframe
+        'fallback_exec_tf': '5m',  # Fallback execution timeframe
     }
 
     ENGINE_VERSION = 'strategy-backtest-v1'
@@ -170,19 +177,24 @@ class BacktestService:
     def get_execution_timeframe(self, start_date: datetime, end_date: datetime, market: str = 'crypto') -> tuple:
         """
         Automatically select execution timeframe based on backtest date range.
-        
+
+        Strategy: pick the finest exec timeframe whose total candle count stays
+        below ~25k bars. Longer windows degrade to coarser exec candles instead
+        of failing — so users still get *some* intra-bar precision over a 6+
+        month range, just not 1-minute precision.
+
         Args:
             start_date: Start date
             end_date: End date
             market: Market type
-            
+
         Returns:
             (execution_timeframe, precision_info)
-            - execution_timeframe: '1m' or '5m'
+            - execution_timeframe: '1m' / '5m' / '15m' / '30m' or None
             - precision_info: Precision info dict for frontend display
         """
         days_diff = (end_date - start_date).days
-        
+
         # Only crypto market supports high-precision backtest
         if market.lower() not in ['crypto', 'cryptocurrency']:
             return None, {
@@ -190,38 +202,44 @@ class BacktestService:
                 'reason': 'only_crypto',
                 'message': 'High-precision backtest only supports cryptocurrency market'
             }
-        
-        if days_diff <= self.MTF_CONFIG['max_1m_days']:
-            # Within 15 days: use 1-minute precision
-            estimated_candles = days_diff * 24 * 60
-            return '1m', {
-                'enabled': True,
-                'timeframe': '1m',
-                'days': days_diff,
-                'estimated_candles': estimated_candles,
-                'precision': 'high',
-                'message': f'Using 1-minute precision backtest (~{estimated_candles:,} candles)'
-            }
-        elif days_diff <= self.MTF_CONFIG['max_5m_days']:
-            # 15 days to 1 year: use 5-minute precision
-            estimated_candles = days_diff * 24 * 12
-            return '5m', {
-                'enabled': True,
-                'timeframe': '5m',
-                'days': days_diff,
-                'estimated_candles': estimated_candles,
-                'precision': 'medium',
-                'message': f'Range exceeds {self.MTF_CONFIG["max_1m_days"]} days, using 5-minute precision (~{estimated_candles:,} candles)'
-            }
-        else:
-            # Over 1 year: high-precision backtest not supported
-            return None, {
-                'enabled': False,
-                'reason': 'too_long',
-                'days': days_diff,
-                'max_days': self.MTF_CONFIG['max_5m_days'],
-                'message': f'Backtest range {days_diff} days exceeds max limit {self.MTF_CONFIG["max_5m_days"]} days'
-            }
+
+        # Tier table: (max_days, exec_tf, candles_per_day, precision_label).
+        # Ordered finest-first; we pick the first tier whose cap covers the range.
+        tiers = [
+            (self.MTF_CONFIG['max_1m_days'],  '1m',  24 * 60, 'high'),
+            (self.MTF_CONFIG['max_5m_days'],  '5m',  24 * 12, 'medium'),
+            (self.MTF_CONFIG['max_15m_days'], '15m', 24 * 4,  'medium'),
+            (self.MTF_CONFIG['max_30m_days'], '30m', 24 * 2,  'low'),
+        ]
+
+        for max_days, exec_tf, candles_per_day, precision in tiers:
+            if days_diff <= max_days:
+                estimated_candles = days_diff * candles_per_day
+                return exec_tf, {
+                    'enabled': True,
+                    'timeframe': exec_tf,
+                    'days': days_diff,
+                    'estimated_candles': estimated_candles,
+                    'precision': precision,
+                    # Single, consistent message format so the UI can show the
+                    # exact exec-tf picked + estimated workload at a glance.
+                    'message': f'Using {exec_tf} precision backtest (~{estimated_candles:,} candles)',
+                }
+
+        # Beyond the largest tier: silently fall back to standard backtest at the
+        # strategy timeframe. We mark enabled=False so run_multi_timeframe()
+        # routes to self.run(); the UI surfaces this as "MTF auto-disabled,
+        # using standard backtest" rather than a hard failure.
+        return None, {
+            'enabled': False,
+            'reason': 'range_exceeds_high_precision',
+            'days': days_diff,
+            'max_days': self.MTF_CONFIG['max_30m_days'],
+            'message': (
+                f'High-precision MTF is capped at {self.MTF_CONFIG["max_30m_days"]} days '
+                f'(requested {days_diff} days); falling back to standard candle backtest'
+            ),
+        }
 
     def _liquidation_loss(self, capital: Any) -> float:
         try:
@@ -510,6 +528,11 @@ class BacktestService:
                 fallback_reason = 'scale_rules_not_supported_in_mtf'
             elif signal_timing not in ['next_bar_open', 'next_open', 'nextopen', 'next']:
                 fallback_reason = 'signal_timing_not_supported_in_mtf'
+            elif not precision_info.get('enabled'):
+                # MTF was disabled by get_execution_timeframe (e.g. range exceeds
+                # the 5m cap or non-crypto market). Surface its precise reason so
+                # the UI can tell users "auto-fell-back to standard candles".
+                fallback_reason = precision_info.get('reason') or 'mtf_unavailable'
             elif signal_tf_seconds <= exec_tf_seconds:
                 fallback_reason = 'no_precision_gain'
             logger.info(
@@ -613,7 +636,7 @@ class BacktestService:
         # 4. Use execution timeframe for precise trade simulation
         try:
             logger.info("Starting MTF trading simulation...")
-            equity_curve, trades, total_commission = self._simulate_trading_mtf(
+            _mtf_ret = self._simulate_trading_mtf(
             df_signal=df_signal,
             df_exec=df_exec,
             signals=signals,
@@ -626,6 +649,14 @@ class BacktestService:
                 signal_timeframe=timeframe,
                 exec_timeframe=exec_tf
             )
+            # Backward-compat: older signature returned 3-tuple, current returns
+            # 4-tuple with `total_funding_paid` last. Tolerate both so older
+            # forks of `_simulate_trading_mtf` don't break this call site.
+            if len(_mtf_ret) == 4:
+                equity_curve, trades, total_commission, total_funding = _mtf_ret
+            else:
+                equity_curve, trades, total_commission = _mtf_ret
+                total_funding = 0.0
             logger.info(f"MTF simulation completed: {len(trades)} trades executed")
         except Exception as e:
             logger.error(f"MTF simulation failed: {str(e)}")
@@ -650,6 +681,10 @@ class BacktestService:
             result['execution_timeframe'] = exec_tf
             result['signal_candles'] = len(df_signal)
             result['execution_candles'] = len(df_exec)
+            try:
+                result['totalFundingPaid'] = round(float(total_funding or 0.0), 6)
+            except Exception:
+                result['totalFundingPaid'] = 0.0
             result['executionAssumptions'] = self._execution_assumptions(
                 strategy_config,
                 simulation_mode='mtf',
@@ -712,7 +747,43 @@ class BacktestService:
         trailing_enabled = bool(trailing_cfg.get('enabled'))
         trailing_pct = float(trailing_cfg.get('pct') or 0.0)
         trailing_activation_pct = float(trailing_cfg.get('activationPct') or 0.0)
-        
+
+        # Signal-timing mode (next_bar_open / same_bar_close / ...). Mirrors the
+        # parsing done in `run_multi_timeframe`/`run`/`run_strategy_script`. It's
+        # used at the tail of this function by `_annotate_signal_bar_times` to
+        # align each trade with the originating signal candle on the chart.
+        # Historically this was an unbound name here — any successful MTF run
+        # would raise `NameError: name 'signal_timing' is not defined` at the
+        # very last step, masking otherwise-correct results.
+        exec_cfg = cfg.get('execution') or {}
+        signal_timing = str(exec_cfg.get('signalTiming') or 'next_bar_open').strip().lower()
+
+        # Funding rate simulation. Off by default for backward compatibility.
+        # Annual rate accepts both decimal (0.10 = 10%) and percentage (10 = 10%).
+        # We charge `notional * rate_per_period` from capital at every funding
+        # boundary that falls within the bar's [open_ts, open_ts + tf) window.
+        # Sign convention: positive rate => long pays / short receives.
+        fees_cfg = cfg.get('fees') or {}
+        funding_rate_annual_raw = fees_cfg.get('fundingRateAnnual', 0)
+        try:
+            funding_rate_annual = float(funding_rate_annual_raw or 0)
+        except (TypeError, ValueError):
+            funding_rate_annual = 0.0
+        # Auto-detect "percent" inputs (e.g. 10 instead of 0.10).
+        if abs(funding_rate_annual) > 1.5:
+            funding_rate_annual = funding_rate_annual / 100.0
+        try:
+            funding_interval_hours = float(fees_cfg.get('fundingIntervalHours') or 8)
+        except (TypeError, ValueError):
+            funding_interval_hours = 8.0
+        if funding_interval_hours <= 0:
+            funding_interval_hours = 8.0
+        funding_periods_per_year = (365.25 * 24.0) / funding_interval_hours
+        funding_rate_per_period = (funding_rate_annual / funding_periods_per_year) if funding_periods_per_year > 0 else 0.0
+        funding_enabled = abs(funding_rate_per_period) > 1e-12
+        funding_interval_seconds = int(funding_interval_hours * 3600)
+        total_funding_paid = 0.0
+
         lev = max(int(leverage or 1), 1)
         stop_loss_pct_eff = stop_loss_pct / lev if stop_loss_pct > 0 else 0
         take_profit_pct_eff = take_profit_pct / lev if take_profit_pct > 0 else 0
@@ -933,7 +1004,15 @@ class BacktestService:
         
         logger.info(f"Starting execution loop: {total_exec_candles} candles to process, {len(signal_queue)} signals in queue")
         
-        for i, (timestamp, row) in enumerate(df_exec.iterrows()):
+        # Funding cursor: epoch seconds of the next due funding payment.
+        # Initialised lazily on the first bar so we don't need start_date here.
+        next_funding_ts = None
+        # NOTE: `df_exec.itertuples()` is ~5-10x faster than `iterrows()` on
+        # large frames (50k+ rows in 5m / 90-day backtests) because it skips
+        # building a fresh `pd.Series` per row. `row.Index` is the timestamp
+        # and `row.open/.high/.low/.close` map to the OHLC columns.
+        for i, row in enumerate(df_exec.itertuples(index=True)):
+            timestamp = row.Index
             # Progress logging
             if i > 0 and i % progress_log_interval == 0:
                 progress_pct = (i / total_exec_candles) * 100
@@ -941,6 +1020,39 @@ class BacktestService:
             # 爆仓后直接停止回测，输出结果
             if is_liquidated:
                 break
+
+            # Funding fee accrual — runs once per bar, BEFORE signal/SL processing
+            # so trades that close on this bar still pay one period of carry.
+            # We charge for every funding boundary that falls within
+            # [bar_open_ts, bar_open_ts + exec_tf). Multiple boundaries per bar
+            # are rare (only when exec_tf > funding interval) but handled.
+            if funding_enabled and position != 0:
+                try:
+                    bar_ts = int(timestamp.timestamp())
+                except Exception:
+                    bar_ts = None
+                if bar_ts is not None:
+                    if next_funding_ts is None:
+                        next_funding_ts = ((bar_ts // funding_interval_seconds) + 1) * funding_interval_seconds
+                    bar_end_ts = bar_ts + exec_tf_seconds
+                    while next_funding_ts < bar_end_ts:
+                        if position != 0:
+                            # Notional uses current entry-price reference; this is a
+                            # conservative approximation for cross/isolated margin.
+                            notional = abs(position) * (entry_price if entry_price else 0.0)
+                            if notional > 0:
+                                # Long pays positive funding, short receives it.
+                                sign = 1.0 if position > 0 else -1.0
+                                funding_charge = notional * funding_rate_per_period * sign
+                                capital -= funding_charge
+                                total_funding_paid += funding_charge
+                                if capital <= 0:
+                                    capital = 0
+                                    is_liquidated = True
+                                    break
+                        next_funding_ts += funding_interval_seconds
+                if is_liquidated:
+                    break
 
             # bar_time: floor of execution timestamp to signal timeframe.
             # This is the chart-bar that the front-end displays and is used to
@@ -963,11 +1075,11 @@ class BacktestService:
                 equity_curve.append({'time': timestamp.strftime('%Y-%m-%d %H:%M'), 'value': 0})
                 continue
             
-            open_ = row['open']
-            high = row['high']
-            low = row['low']
-            close = row['close']
-            
+            open_ = row.open
+            high = row.high
+            low = row.low
+            close = row.close
+
             # Use inferred candle price path to determine trigger order
             price_path = self._infer_candle_path(open_, high, low, close)
             
@@ -1452,8 +1564,10 @@ class BacktestService:
                 logger.error(f"  First few signals: {signal_queue[:min(5, len(signal_queue))]}")
                 logger.error(f"  Exec data range: {df_exec.index[0]} to {df_exec.index[-1]}")
                 raise ValueError(f"No trades executed despite {len(signal_queue)} signals. Check signal timing and position state logic.")
-        
-        return equity_curve, trades, total_commission_paid
+
+        self._annotate_signal_bar_times(trades, signal_tf_seconds, signal_timing)
+
+        return equity_curve, trades, total_commission_paid, total_funding_paid
 
     def run_strategy_snapshot(
         self,
@@ -1748,16 +1862,27 @@ class BacktestService:
             logger.info(f"K-line cache HIT for {cache_key} ({len(cached)} candles)")
             return cached
         
-        # Fetch data
-        kline_data = DataSourceFactory.get_kline(
-            market=market,
-            symbol=symbol,
-            timeframe=timeframe,
-            limit=limit,
-            before_time=before_time,
-            after_time=after_time,
-        )
-        
+        # Fetch data. We deliberately swallow any upstream exception (CCXT
+        # network/rate-limit errors, yfinance hiccups, etc.) and return an empty
+        # DataFrame instead — the MTF entry point then falls back to a standard
+        # backtest with a clear `mtfFallbackReason='data_unavailable'`, which is
+        # far friendlier than bubbling up a 500.
+        try:
+            kline_data = DataSourceFactory.get_kline(
+                market=market,
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+                before_time=before_time,
+                after_time=after_time,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"DataSourceFactory.get_kline raised for {market}:{symbol} {timeframe} "
+                f"(limit={limit}): {exc}; returning empty DataFrame so the caller can fall back."
+            )
+            return pd.DataFrame()
+
         if not kline_data:
             logger.warning(f"No candle data retrieved for {market}:{symbol}, timeframe={timeframe}, limit={limit}, before_time={before_time}")
             return pd.DataFrame()
@@ -4921,6 +5046,57 @@ class BacktestService:
         if mtf_fallback_reason:
             payload['mtfFallbackReason'] = mtf_fallback_reason
         return payload
+
+    @staticmethod
+    def _annotate_signal_bar_times(
+        trades: List[Dict[str, Any]],
+        signal_tf_seconds: int,
+        signal_timing: str,
+    ) -> None:
+        """Backfill `signal_bar_time` onto every trade for chart double-display.
+
+        Convention for the frontend overlay layer:
+          * `bar_time`        = chart-aligned EXECUTION bar (what user sees as fill)
+          * `signal_bar_time` = chart-aligned SIGNAL bar (where the rule fired)
+
+        For pure signal-triggered open/close (no _stop/_profit/_trailing/liquidation
+        suffix) under `next_bar_open`, signal bar is exactly one signal_tf BEFORE
+        the execution bar. For SL/TP/trailing/liquidation triggers, there is no
+        meaningful "signal bar" — they fire intra-bar from the price path — so we
+        align signal_bar_time to bar_time so the renderer only draws a single marker.
+        For `bar_close` execution mode, signal and execution coincide on the same bar.
+        """
+        if not trades:
+            return
+        delta_seconds = int(signal_tf_seconds) if signal_tf_seconds else 0
+        use_offset = (
+            delta_seconds > 0
+            and str(signal_timing or '').strip().lower()
+            in ('next_bar_open', 'next_open', 'nextopen', 'next')
+        )
+        delta = timedelta(seconds=delta_seconds) if use_offset else timedelta(0)
+        for trade in trades:
+            if 'signal_bar_time' in trade:
+                continue
+            bt = trade.get('bar_time') or trade.get('time')
+            if not bt:
+                trade['signal_bar_time'] = None
+                continue
+            ty = str(trade.get('type') or '').lower()
+            price_path_trigger = (
+                '_stop' in ty
+                or '_profit' in ty
+                or '_trailing' in ty
+                or ty == 'liquidation'
+            )
+            if not use_offset or price_path_trigger:
+                trade['signal_bar_time'] = bt
+                continue
+            try:
+                bt_dt = pd.to_datetime(bt)
+                trade['signal_bar_time'] = (bt_dt - delta).strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                trade['signal_bar_time'] = bt
 
     def _format_result(
         self,

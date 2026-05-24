@@ -24,7 +24,8 @@ from app.services.live_trading.symbols import to_binance_futures_symbol
 class BinanceFuturesClient(BaseRestClient):
     def __init__(self, *, api_key: str, secret_key: str, base_url: str = None, enable_demo_trading: bool = False, timeout_sec: float = 15.0, broker_id: str = ""):
         if not base_url:
-            base_url = "https://demo-fapi.binance.com" if enable_demo_trading else "https://fapi.binance.com"
+            # Binance USDT-M Futures Testnet (official): https://testnet.binancefuture.com
+            base_url = "https://testnet.binancefuture.com" if enable_demo_trading else "https://fapi.binance.com"
 
         super().__init__(base_url=base_url, timeout_sec=timeout_sec)
         self.api_key = (api_key or "").strip()

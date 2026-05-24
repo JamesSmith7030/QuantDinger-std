@@ -3,24 +3,34 @@
 ARG BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${BASE_IMAGE}
 
+# BUILD_REGION switches apt/PyPI sources:
+#   cn      -> Aliyun mirrors first, fall back to official on failure (default; zero-config for China)
+#   global  -> use Debian/PyPI official directly, skip Aliyun entirely (used by GitHub Actions runners)
+ARG BUILD_REGION=cn
+
 WORKDIR /app
 
-# Apt: try Aliyun Debian mirror first (typical win in mainland); on failure restore official.
-# No env vars — same Dockerfile works abroad (falls back) and in CN (usually hits mirror).
+# Apt: when BUILD_REGION=cn, try Aliyun Debian mirror first (typical win in mainland) and
+# restore official on failure. Otherwise go straight to official sources so overseas
+# builders (e.g. GitHub-hosted runners) don't waste time hitting cn mirrors.
 RUN set -eux; \
     APT_TIMEOUT='Acquire::http::Timeout=35'; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-      cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.bak; \
-      sed -i -E \
-        's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' \
-        /etc/apt/sources.list.d/debian.sources; \
-      if ! apt-get -o "$APT_TIMEOUT" -o Acquire::https::Timeout=35 update; then \
-        cp /tmp/debian.sources.bak /etc/apt/sources.list.d/debian.sources; \
+    if [ "$BUILD_REGION" = "cn" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.bak; \
+        sed -i -E \
+          's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' \
+          /etc/apt/sources.list.d/debian.sources; \
+        if ! apt-get -o "$APT_TIMEOUT" -o Acquire::https::Timeout=35 update; then \
+          cp /tmp/debian.sources.bak /etc/apt/sources.list.d/debian.sources; \
+          sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+          apt-get -o "$APT_TIMEOUT" update; \
+        fi; \
+      else \
         sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
         apt-get -o "$APT_TIMEOUT" update; \
       fi; \
     else \
-      sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
       apt-get -o "$APT_TIMEOUT" update; \
     fi; \
     apt-get install -y --no-install-recommends --fix-missing \
@@ -34,12 +44,17 @@ RUN set -eux; \
 
 COPY requirements.txt .
 
-# Pip: try Aliyun PyPI first; on any failure retry default index (PyPI.org).
+# Pip: when BUILD_REGION=cn, try Aliyun PyPI first; on any failure retry default index.
+# Otherwise install from PyPI official directly.
 RUN set -eux; \
-    pip install --no-cache-dir --prefer-binary --timeout 180 \
-        -i https://mirrors.aliyun.com/pypi/simple/ \
-        -r requirements.txt \
-      || pip install --no-cache-dir --prefer-binary --timeout 180 -r requirements.txt; \
+    if [ "$BUILD_REGION" = "cn" ]; then \
+      pip install --no-cache-dir --prefer-binary --timeout 180 \
+          -i https://mirrors.aliyun.com/pypi/simple/ \
+          -r requirements.txt \
+        || pip install --no-cache-dir --prefer-binary --timeout 180 -r requirements.txt; \
+    else \
+      pip install --no-cache-dir --prefer-binary --timeout 180 -r requirements.txt; \
+    fi; \
     apt-get purge -y --auto-remove build-essential python3-dev libffi-dev libssl-dev; \
     rm -rf /var/lib/apt/lists/*
 

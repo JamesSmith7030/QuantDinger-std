@@ -39,12 +39,20 @@ from app.services.live_trading.symbols import to_gate_currency_pair
 from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.strategy_runtime_logs import append_strategy_log
+from app.services.strategy_lifecycle import (
+    auto_stop_live_strategy,
+    is_fatal_exchange_error,
+    should_skip_position_sync,
+)
 
 # Lazy import IBKR to avoid ImportError if ib_insync not installed
 IBKRClient = None
 
 # Lazy import MT5 to avoid ImportError if MetaTrader5 not installed
 MT5Client = None
+
+# Lazy import Alpaca to avoid ImportError if alpaca-py not installed
+AlpacaClient = None
 
 logger = get_logger(__name__)
 
@@ -191,7 +199,9 @@ class PendingOrderWorker:
             logger.debug(f"[PositionSync] Found {len(active_rows)} active live strategies in DB.")
             for _ar in active_rows:
                 _sid = int(_ar.get("id") or 0)
-                if _sid > 0 and _sid not in sid_to_rows:
+                if _sid <= 0 or should_skip_position_sync(_sid):
+                    continue
+                if _sid not in sid_to_rows:
                     if target_strategy_id and target_strategy_id != _sid:
                         continue
                     sid_to_rows[_sid] = []
@@ -201,6 +211,8 @@ class PendingOrderWorker:
         # 2) Reconcile per strategy
         for sid, plist in sid_to_rows.items():
             if target_strategy_id and sid != target_strategy_id:
+                continue
+            if should_skip_position_sync(int(sid)):
                 continue
             try:
                 sc = load_strategy_configs(int(sid))
@@ -238,7 +250,9 @@ class PendingOrderWorker:
                     if sym and isinstance(sym, str):
                         allowed_symbols.add(sym.strip().upper())
 
-                # Lazy import MT5 here to allow elif chain later
+                # Lazy import MT5 / IBKR / Alpaca clients here so the elif chain
+                # below can rely on isinstance() checks without paying the import
+                # cost on systems that don't ship those broker libs.
                 global MT5Client
                 if MT5Client is None:
                     try:
@@ -247,11 +261,38 @@ class PendingOrderWorker:
                     except ImportError:
                         pass
 
+                global IBKRClient
+                if IBKRClient is None:
+                    try:
+                        from app.services.ibkr_trading import IBKRClient as _IBKRClient
+                        IBKRClient = _IBKRClient
+                    except ImportError:
+                        pass
+
+                global AlpacaClient
+                if AlpacaClient is None:
+                    try:
+                        from app.services.alpaca_trading import AlpacaClient as _AlpacaClient
+                        AlpacaClient = _AlpacaClient
+                    except ImportError:
+                        pass
+
                 # 尝试创建客户端，如果失败则跳过（可能是配置错误）
                 try:
                     client = create_client(exchange_config, market_type=market_type)
                 except Exception as e:
-                    logger.debug(f"[PositionSync] Strategy {sid} skipped: failed to create client (exchange_id={exchange_id}): {e}")
+                    msg = str(e)
+                    if is_fatal_exchange_error(msg):
+                        logger.error(
+                            "[PositionSync] Strategy %s fatal client error; auto-stopping. error=%s",
+                            sid,
+                            msg,
+                        )
+                        auto_stop_live_strategy(int(sid), msg, source="position_sync_client")
+                    else:
+                        logger.debug(
+                            f"[PositionSync] Strategy {sid} skipped: failed to create client (exchange_id={exchange_id}): {e}"
+                        )
                     continue
                 
                 # Build an "exchange snapshot" per symbol+side
@@ -259,7 +300,19 @@ class PendingOrderWorker:
                 exch_entry_price: Dict[str, Dict[str, float]] = {} # {symbol: {long: px, short: px}}
 
                 if isinstance(client, BinanceFuturesClient) and market_type == "swap":
-                    all_pos = client.get_positions() or []
+                    try:
+                        all_pos = client.get_positions() or []
+                    except Exception as e:
+                        msg = str(e)
+                        m = msg.lower()
+                        # Fatal auth/config errors should auto-stop the strategy to avoid endless spam.
+                        # Typical Binance response: HTTP 401 {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}
+                        if is_fatal_exchange_error(msg):
+                            logger.error(f"[PositionSync] Strategy {sid} fatal auth error; auto-stopping. error={msg}")
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_binance")
+                            continue
+                        logger.error(f"[PositionSync] Strategy {sid} get_positions failed: {msg}", exc_info=True)
+                        continue
                     # Handle dict response if needed (wrapper)
                     if isinstance(all_pos, dict) and "raw" in all_pos:
                          all_pos = all_pos["raw"]
@@ -284,7 +337,20 @@ class PendingOrderWorker:
                             exch_entry_price.setdefault(hb_sym, {"long": 0.0, "short": 0.0})[side] = abs(float(ep))
 
                 elif isinstance(client, OkxClient) and market_type == "swap":
-                    resp = client.get_positions()
+                    try:
+                        resp = client.get_positions()
+                    except Exception as e:
+                        # Fatal auth/config errors should auto-stop the strategy to avoid endless spam.
+                        # Typical OKX response: HTTP 401 {"msg":"Invalid OK-ACCESS-KEY","code":"50111"}
+                        msg = str(e)
+                        m = msg.lower()
+                        if is_fatal_exchange_error(msg):
+                            logger.error(f"[PositionSync] Strategy {sid} fatal auth error; auto-stopping. error={msg}")
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_okx")
+                            continue
+                        # Non-fatal: keep syncing other strategies, but don't crash the worker loop.
+                        logger.error(f"[PositionSync] Strategy {sid} get_positions failed: {msg}", exc_info=True)
+                        continue
                     data = (resp.get("data") or []) if isinstance(resp, dict) else []
                     if isinstance(data, list):
                         for p in data:
@@ -498,6 +564,81 @@ class PendingOrderWorker:
                             side = "long" if pos_type == "buy" else "short"
                             exch_size.setdefault(sym, {"long": 0.0, "short": 0.0})[side] = float(vol)
                     # Continue to reconciliation logic below
+
+                elif IBKRClient is not None and isinstance(client, IBKRClient):
+                    # IBKR US-stock positions. `quantity` is signed: >0 = long, <0 = short.
+                    # We currently only enforce long-only entries (see _execute_ibkr_order),
+                    # but still mirror short rows so reconciliation does not orphan them
+                    # if the user had pre-existing inventory in TWS.
+                    try:
+                        positions = client.get_positions() or []
+                    except Exception as e:
+                        msg = str(e)
+                        if is_fatal_exchange_error(msg):
+                            logger.error(
+                                "[PositionSync] Strategy %s IBKR fatal error; auto-stopping. error=%s",
+                                sid,
+                                msg,
+                            )
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_ibkr")
+                        else:
+                            logger.error(f"[PositionSync] Strategy {sid} IBKR get_positions failed: {e}", exc_info=True)
+                        continue
+                    if isinstance(positions, list):
+                        for p in positions:
+                            if not isinstance(p, dict):
+                                continue
+                            sym = str(p.get("symbol") or p.get("ib_symbol") or "").strip()
+                            try:
+                                qty = float(p.get("quantity") or 0.0)
+                            except Exception:
+                                qty = 0.0
+                            try:
+                                avg = float(p.get("avgCost") or 0.0)
+                            except Exception:
+                                avg = 0.0
+                            if not sym or abs(qty) <= 0:
+                                continue
+                            side = "long" if qty > 0 else "short"
+                            exch_size.setdefault(sym, {"long": 0.0, "short": 0.0})[side] = abs(qty)
+                            if avg > 0:
+                                exch_entry_price.setdefault(sym, {"long": 0.0, "short": 0.0})[side] = avg
+                    # Continue to reconciliation logic below
+
+                elif AlpacaClient is not None and isinstance(client, AlpacaClient):
+                    # Alpaca positions cover both US stocks and crypto. The client
+                    # already returns a normalized `side` string ("long" / "short")
+                    # plus `quantity` and `avgCost`. Crypto symbols come through as
+                    # "BTC/USD" — same format the strategy stores, so no extra
+                    # normalization is needed here.
+                    try:
+                        positions = client.get_positions() or []
+                    except Exception as e:
+                        logger.error(f"[PositionSync] Strategy {sid} Alpaca get_positions failed: {e}", exc_info=True)
+                        continue
+                    if isinstance(positions, list):
+                        for p in positions:
+                            if not isinstance(p, dict):
+                                continue
+                            sym = str(p.get("symbol") or "").strip()
+                            try:
+                                qty = float(p.get("quantity") or 0.0)
+                            except Exception:
+                                qty = 0.0
+                            try:
+                                avg = float(p.get("avgCost") or 0.0)
+                            except Exception:
+                                avg = 0.0
+                            if not sym or abs(qty) <= 0:
+                                continue
+                            side_str = str(p.get("side") or "").strip().lower()
+                            if side_str not in ("long", "short"):
+                                side_str = "long" if qty > 0 else "short"
+                            exch_size.setdefault(sym, {"long": 0.0, "short": 0.0})[side_str] = abs(qty)
+                            if avg > 0:
+                                exch_entry_price.setdefault(sym, {"long": 0.0, "short": 0.0})[side_str] = avg
+                    # Continue to reconciliation logic below
+
                 else:
                     # Spot reconciliation is optional; skip for now (keeps self-check low-risk).
                     logger.debug(f"position sync: skip unsupported market/client: sid={sid}, cfg={safe_cfg}, market_type={market_type}, client={type(client)}")
@@ -632,7 +773,12 @@ class PendingOrderWorker:
                 if to_insert:
                     logger.debug(f"position sync: inserted {len(to_insert)} new positions for strategy_id={sid}")
             except Exception as e:
-                logger.error(f"position sync: strategy_id={sid} failed: {e}", exc_info=True)
+                msg = str(e)
+                if is_fatal_exchange_error(msg):
+                    logger.error(f"[PositionSync] Strategy {sid} fatal error; auto-stopping. error={msg}", exc_info=True)
+                    auto_stop_live_strategy(int(sid), msg, source="position_sync")
+                else:
+                    logger.error(f"position sync: strategy_id={sid} failed: {e}", exc_info=True)
 
     def _fetch_pending_orders(self, limit: int = 50) -> List[Dict[str, Any]]:
         try:
@@ -926,39 +1072,42 @@ class PendingOrderWorker:
         exchange_id = str(exchange_config.get("exchange_id") or "").strip().lower()
         market_category = str(cfg.get("market_category") or "Crypto").strip()
 
-        # Validate market category and exchange_id combination for live trading
-        # Futures does not support live trading
-        if market_category in ("Futures",):
-            self._mark_failed(order_id=order_id, error=f"live_trading_not_supported_for_{market_category.lower()}")
-            _console_print(f"[worker] order rejected: strategy_id={strategy_id} pending_id={order_id} {market_category} does not support live trading")
-            _notify_live_best_effort(status="failed", error=f"live_trading_not_supported_for_{market_category.lower()}")
-            append_strategy_log(strategy_id, "error", f"Order rejected: {market_category} does not support live trading")
+        # Pre-resolve market_type / trade_direction / bot_type so we can hand
+        # them to the centralized policy validator. Reading these here also
+        # lets the validator catch e.g. "alpaca + crypto + market_type=swap"
+        # instead of waiting for the broker to reject the order.
+        _pre_market_type = (
+            payload.get("market_type")
+            or order_row.get("market_type")
+            or cfg.get("market_type")
+            or exchange_config.get("market_type")
+            or "swap"
+        )
+        _pre_trading_cfg = cfg.get("trading_config") or {}
+        _pre_trade_direction = _pre_trading_cfg.get("trade_direction")
+        _pre_bot_type = _pre_trading_cfg.get("bot_type")
+
+        # Centralized validation: broker x market x market_type x direction x
+        # bot_type. Same call site that strategy CRUD uses, so an order can
+        # only fail here if the strategy was somehow created before the
+        # policy was tightened, or if the cfg drifted out of sync.
+        from app.services.broker_market_policy import validate_strategy_config
+        try:
+            validate_strategy_config(
+                exchange_id=exchange_id,
+                market_category=market_category,
+                market_type=_pre_market_type,
+                trade_direction=_pre_trade_direction,
+                bot_type=_pre_bot_type,
+                require_exchange=True,
+            )
+        except ValueError as e:
+            err = f"policy_violation:{e}"
+            self._mark_failed(order_id=order_id, error=err)
+            _console_print(f"[worker] order rejected by policy: strategy_id={strategy_id} pending_id={order_id} err={e}")
+            _notify_live_best_effort(status="failed", error=err)
+            append_strategy_log(strategy_id, "error", f"Order rejected: {e}")
             return
-
-        # Validate IBKR only for USStock
-        if exchange_id == "ibkr":
-            if market_category not in ("USStock",):
-                self._mark_failed(order_id=order_id, error=f"ibkr_only_supports_usstock_got_{market_category.lower()}")
-                _console_print(f"[worker] order rejected: strategy_id={strategy_id} pending_id={order_id} IBKR only supports USStock, got {market_category}")
-                _notify_live_best_effort(status="failed", error=f"ibkr_only_supports_usstock_got_{market_category.lower()}")
-                return
-
-        # Validate MT5 only for Forex
-        if exchange_id == "mt5":
-            if market_category != "Forex":
-                self._mark_failed(order_id=order_id, error=f"mt5_only_supports_forex_got_{market_category.lower()}")
-                _console_print(f"[worker] order rejected: strategy_id={strategy_id} pending_id={order_id} MT5 only supports Forex, got {market_category}")
-                _notify_live_best_effort(status="failed", error=f"mt5_only_supports_forex_got_{market_category.lower()}")
-                return
-
-        # Validate crypto exchanges only for Crypto market
-        crypto_exchanges = ["binance", "okx", "bitget", "bybit", "coinbaseexchange", "kraken", "kucoin", "gate"]
-        if exchange_id in crypto_exchanges:
-            if market_category != "Crypto":
-                self._mark_failed(order_id=order_id, error=f"crypto_exchange_only_supports_crypto_got_{market_category.lower()}")
-                _console_print(f"[worker] order rejected: strategy_id={strategy_id} pending_id={order_id} {exchange_id} only supports Crypto, got {market_category}")
-                _notify_live_best_effort(status="failed", error=f"crypto_exchange_only_supports_crypto_got_{market_category.lower()}")
-                return
 
         market_type = (payload.get("market_type") or order_row.get("market_type") or cfg.get("market_type") or exchange_config.get("market_type") or "swap")
         market_type = str(market_type or "swap").strip().lower()
@@ -1016,6 +1165,29 @@ class PendingOrderWorker:
                 client=client,
                 strategy_id=strategy_id,
                 exchange_config=exchange_config,
+                _notify_live_best_effort=_notify_live_best_effort,
+                _console_print=_console_print,
+            )
+            return
+
+        # Check if this is an Alpaca client (US stocks + crypto via REST)
+        global AlpacaClient
+        if AlpacaClient is None:
+            try:
+                from app.services.alpaca_trading import AlpacaClient as _AlpacaClient
+                AlpacaClient = _AlpacaClient
+            except ImportError:
+                pass
+
+        if AlpacaClient is not None and isinstance(client, AlpacaClient):
+            self._execute_alpaca_order(
+                order_id=order_id,
+                order_row=order_row,
+                payload=payload,
+                client=client,
+                strategy_id=strategy_id,
+                exchange_config=exchange_config,
+                market_category=market_category,
                 _notify_live_best_effort=_notify_live_best_effort,
                 _console_print=_console_print,
             )
@@ -1193,23 +1365,6 @@ class PendingOrderWorker:
                 total_fee += fv
                 if (not fee_ccy) and ccy:
                     fee_ccy = str(ccy or "")
-
-        def _fetch_fee_best_effort(*, order_id0: str, client_order_id0: str) -> Tuple[float, str]:
-            """
-            Some exchanges (notably Binance) do not expose commissions on order endpoints.
-            We fetch fills and sum commissions best-effort.
-            """
-            oid = str(order_id0 or "").strip()
-            if not oid:
-                return 0.0, ""
-            try:
-                if isinstance(client, BinanceFuturesClient):
-                    return client.get_fee_for_order(symbol=str(symbol), order_id=oid)
-                if isinstance(client, BinanceSpotClient):
-                    return client.get_fee_for_order(symbol=str(symbol), order_id=oid)
-            except Exception:
-                return 0.0, ""
-            return 0.0, ""
 
         def _current_avg() -> float:
             return float(total_quote / total_base) if total_base > 0 else 0.0
@@ -2019,9 +2174,11 @@ class PendingOrderWorker:
                     filled=filled,
                     avg_price=avg_price,
                 )
-                # Best-effort: subtract commission from profit if fee is in USDT/USDC/USD.
-                if profit is not None and total_fee > 0 and str(fee_ccy or "").upper() in ("USDT", "USDC", "USD"):
-                    profit = float(profit) - float(total_fee)
+                # ``profit`` = trade P&L from position math (gross).
+                # ``commission`` = fee synced from the exchange fill (see
+                # ``total_fee`` above). Net realised P&L is always
+                # ``profit - commission`` at read/aggregate time — do not
+                # pre-subtract here or dashboards double-count the fee.
                 record_trade(
                     strategy_id=strategy_id,
                     symbol=str(symbol),
@@ -2211,6 +2368,146 @@ class PendingOrderWorker:
             _console_print(f"[worker] IBKR order exception: strategy_id={strategy_id} pending_id={order_id} err={e}")
             _notify_live_best_effort(status="failed", error=str(e))
             append_strategy_log(strategy_id, "error", f"IBKR order exception ({symbol} {signal_type}): {e}")
+            if is_fatal_exchange_error(str(e)):
+                auto_stop_live_strategy(int(strategy_id), str(e), source="ibkr_order")
+
+    def _execute_alpaca_order(
+        self,
+        *,
+        order_id: int,
+        order_row: Dict[str, Any],
+        payload: Dict[str, Any],
+        client,  # AlpacaClient instance
+        strategy_id: int,
+        exchange_config: Dict[str, Any],
+        market_category: str,
+        _notify_live_best_effort,
+        _console_print,
+    ) -> None:
+        """
+        Execute order via Alpaca for US stocks (USStock) or crypto.
+
+        Mirrors `_execute_ibkr_order`: market order, brief poll for fill,
+        record trade, mark sent. Long-only — short signals are rejected.
+        """
+        signal_type = payload.get("signal_type") or order_row.get("signal_type")
+        symbol = payload.get("symbol") or order_row.get("symbol")
+        amount = float(payload.get("amount") or order_row.get("amount") or 0.0)
+        ref_price = float(payload.get("ref_price") or payload.get("price") or order_row.get("price") or 0.0)
+
+        sig = str(signal_type or "").strip().lower()
+
+        if "short" in sig:
+            self._mark_failed(order_id=order_id, error="alpaca_short_not_supported")
+            _console_print(f"[worker] Alpaca order rejected: strategy_id={strategy_id} pending_id={order_id} short not supported")
+            _notify_live_best_effort(status="failed", error="alpaca_short_not_supported")
+            return
+
+        if sig in ("open_long", "add_long"):
+            action = "buy"
+        elif sig in ("close_long", "reduce_long", "close_long_stop", "close_long_profit", "close_long_trailing"):
+            action = "sell"
+        else:
+            self._mark_failed(order_id=order_id, error=f"alpaca_unsupported_signal:{signal_type}")
+            _console_print(f"[worker] Alpaca order rejected: strategy_id={strategy_id} pending_id={order_id} unsupported signal {signal_type}")
+            _notify_live_best_effort(status="failed", error=f"alpaca_unsupported_signal:{signal_type}")
+            return
+
+        # Decide stock vs crypto leg of the Alpaca account based on the
+        # strategy's market_category (USStock by default).
+        mc = (market_category or "USStock").strip()
+        market_type_for_client = "crypto" if mc.lower() in ("crypto", "cryptocurrency") else "USStock"
+
+        try:
+            result = client.place_market_order(
+                symbol=symbol,
+                side=action,
+                quantity=amount,
+                market_type=market_type_for_client,
+            )
+
+            if not result.success:
+                self._mark_failed(order_id=order_id, error=f"alpaca_order_failed:{result.message}")
+                _console_print(f"[worker] Alpaca order failed: strategy_id={strategy_id} pending_id={order_id} err={result.message}")
+                _notify_live_best_effort(status="failed", error=f"alpaca_order_failed:{result.message}")
+                append_strategy_log(strategy_id, "error", f"Alpaca order failed ({symbol} {signal_type}): {result.message}")
+                return
+
+            filled = float(result.filled or 0.0)
+            avg_price = float(result.avg_price or 0.0)
+            exchange_order_id = str(result.order_id or "")
+
+            if avg_price <= 0 and ref_price > 0:
+                logger.warning(
+                    f"[worker] Alpaca order avg_price=0, using ref_price={ref_price} as fallback: "
+                    f"strategy_id={strategy_id} pending_id={order_id}"
+                )
+                avg_price = ref_price
+            if filled <= 0:
+                logger.warning(
+                    f"[worker] Alpaca order filled=0, using amount={amount} as fallback: "
+                    f"strategy_id={strategy_id} pending_id={order_id}"
+                )
+                filled = amount
+
+            executed_at = int(time.time())
+
+            self._mark_sent(
+                order_id=order_id,
+                note="alpaca_order_sent",
+                exchange_id="alpaca",
+                exchange_order_id=exchange_order_id,
+                exchange_response_json=json.dumps(result.raw or {}, ensure_ascii=False),
+                filled=filled,
+                avg_price=avg_price,
+                executed_at=executed_at,
+            )
+            _console_print(
+                f"[worker] Alpaca order sent: strategy_id={strategy_id} pending_id={order_id} "
+                f"order_id={exchange_order_id} filled={filled} avg={avg_price}"
+            )
+
+            try:
+                if filled > 0 and avg_price > 0:
+                    profit, _pos = apply_fill_to_local_position(
+                        strategy_id=strategy_id,
+                        symbol=str(symbol),
+                        signal_type=str(signal_type),
+                        filled=filled,
+                        avg_price=avg_price,
+                    )
+                    record_trade(
+                        strategy_id=strategy_id,
+                        symbol=str(symbol),
+                        trade_type=str(signal_type),
+                        price=avg_price,
+                        amount=filled,
+                        commission=0.0,  # Alpaca commissions are zero on stocks; crypto has fees in raw
+                        commission_ccy="USD",
+                        profit=profit,
+                    )
+                    _pstr = f", profit={profit:.4f}" if profit is not None else ""
+                    append_strategy_log(
+                        strategy_id, "trade",
+                        f"Trade executed: {signal_type} {symbol} filled={filled:.6f} @ {avg_price:.6f}{_pstr} (exchange=alpaca)",
+                    )
+            except Exception as e:
+                logger.warning(f"Alpaca record_trade/update_position failed: pending_id={order_id}, err={e}")
+
+            _notify_live_best_effort(
+                status="sent",
+                exchange_id="alpaca",
+                exchange_order_id=exchange_order_id,
+                price_hint=avg_price,
+                amount_hint=filled,
+            )
+
+        except Exception as e:
+            logger.error(f"Alpaca order execution failed: pending_id={order_id}, strategy_id={strategy_id}, err={e}")
+            self._mark_failed(order_id=order_id, error=f"alpaca_exception:{e}")
+            _console_print(f"[worker] Alpaca order exception: strategy_id={strategy_id} pending_id={order_id} err={e}")
+            _notify_live_best_effort(status="failed", error=str(e))
+            append_strategy_log(strategy_id, "error", f"Alpaca order exception ({symbol} {signal_type}): {e}")
 
     def _execute_mt5_order(
         self,

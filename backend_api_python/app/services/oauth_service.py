@@ -156,15 +156,29 @@ class OAuthService:
         self.github_redirect_uri = os.getenv('GITHUB_REDIRECT_URI', '')
         self.github_enabled = bool(self.github_client_id and self.github_client_secret)
         
-        # Frontend URL for redirect after OAuth
-        self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:8080')
+        # Frontend URL for redirect after OAuth.
+        #
+        # FRONTEND_URL accepts a comma-separated list of origins (the same
+        # convention used by CORS in `app/__init__.py`). This lets one backend
+        # serve e.g. ai.quantdinger.com + m.quantdinger.com without forcing the
+        # operator to also fill OAUTH_ALLOWED_REDIRECTS.
+        #
+        # The FIRST entry is the default post-login redirect target. Every
+        # entry is added to the allow-list. If we ever stored the raw
+        # comma-joined string as a single URL we'd build a redirect like
+        # "https://a.example.com,https://b.example.com?oauth_token=..." and
+        # the browser would land on a malformed page (see bug report
+        # 2026-05-14: stray comma + missing colon in the second origin).
+        raw_frontend = os.getenv('FRONTEND_URL', 'http://localhost:8080')
+        frontend_list = [x.strip() for x in raw_frontend.split(',') if x.strip()]
+        self.frontend_url = frontend_list[0] if frontend_list else 'http://localhost:8080'
 
         # Allow-listed origins that may be used as post-login redirect targets
-        # (comma-separated). FRONTEND_URL is always allowed.
+        # (comma-separated). FRONTEND_URL entries are always allowed.
         raw_allowed = os.getenv('OAUTH_ALLOWED_REDIRECTS', '')
         extra = [x.strip() for x in raw_allowed.split(',') if x.strip()]
         self.allowed_redirect_origins = set()
-        for item in [self.frontend_url] + extra:
+        for item in frontend_list + extra:
             origin = self._normalize_origin(item)
             if origin:
                 self.allowed_redirect_origins.add(origin)

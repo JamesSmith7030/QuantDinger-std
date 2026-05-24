@@ -24,6 +24,10 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.auth import login_required
 from app.services.indicator_params import IndicatorCaller, IndicatorParamsParser
+from app.services.indicator_translator import (
+    translate_indicator,
+    SUPPORTED_LANGUAGES as _SUPPORTED_LANGUAGES_FOR_TRANSLATE,
+)
 import requests
 
 logger = get_logger(__name__)
@@ -358,6 +362,57 @@ def _indicator_hint_to_text(hint_code: str, params: Dict[str, Any] | None = None
         return "未声明止损默认配置。" if is_zh else "Stop-loss default is not declared."
     if hint_code == "NO_TAKE_PROFIT":
         return "未声明止盈默认配置。" if is_zh else "Take-profit default is not declared."
+    if hint_code == "NDARRAY_PANDAS_METHOD_MISUSE":
+        symbol = params.get("symbol") or "ndarray"
+        method = params.get("method") or "?"
+        return (
+            f"在 ndarray 上调用了 pandas 方法：{symbol}.{method}(...)。"
+            "请用 pd.Series(arr, index=df.index) 包装回 Series，或改用 pandas 原生的 .where/.clip/.abs。"
+            if is_zh else
+            f"Pandas method called on a numpy ndarray: {symbol}.{method}(...). "
+            "Wrap with pd.Series(arr, index=df.index) before calling pandas methods, "
+            "or rewrite with pandas-native .where/.clip/.abs."
+        )
+    if hint_code == "HELPER_RETURNS_NDARRAY":
+        names_str = params.get("names_str") or ", ".join(params.get("names") or []) or "helper"
+        return (
+            f"自定义函数返回 ndarray：{names_str}。"
+            "下游若调用 .rolling/.fillna/.shift/.ewm/.iloc 会 AttributeError，"
+            "建议让 helper 直接返回 Series（例如 num / den.replace(0, np.nan).fillna(0)）。"
+            if is_zh else
+            f"User helpers return numpy ndarray: {names_str}. "
+            "Downstream .rolling/.fillna/.shift/.ewm/.iloc on the result will AttributeError; "
+            "have the helper return a Series instead (e.g. num / den.replace(0, np.nan).fillna(0))."
+        )
+    if hint_code == "RUNTIME_ERROR_ON_VERIFY":
+        error_type = params.get("error_type") or "RuntimeError"
+        detail = params.get("detail") or ""
+        return (
+            f"沙箱试跑时抛出 {error_type}：{detail}。"
+            if is_zh else
+            f"Sandbox dry-run raised {error_type}: {detail}."
+        )
+    if hint_code == "FUTURE_DATA_LEAK":
+        snippet = params.get("snippet") or "?"
+        kind = params.get("kind") or ""
+        kind_zh = {
+            "shift": "负数 shift",
+            "iloc": "iloc 正向偏移",
+            "bars_ago": "bars_ago 负数",
+        }.get(kind, kind or "未知模式")
+        kind_en = {
+            "shift": "negative shift",
+            "iloc": "forward iloc offset",
+            "bars_ago": "negative bars_ago",
+        }.get(kind, kind or "unknown pattern")
+        return (
+            f"检测到未来数据泄露（{kind_zh}）：{snippet}。"
+            "回测会用到尚未发生的K线，实盘永远无法复现；请改用 .shift(N) 正数或 iloc[i-N] 引用过去。"
+            if is_zh else
+            f"Future data leak detected ({kind_en}): {snippet}. "
+            "Backtest is reading bars that haven't happened yet, which can NEVER be reproduced live. "
+            "Use .shift(N) with positive N or iloc[i-N] to reference the past instead."
+        )
     return f"检测到代码提示：{hint_code}" if is_zh else f"Code hint detected: {hint_code}"
 
 
@@ -506,6 +561,10 @@ def save_indicator():
             # Best-effort schema upgrade for VIP-free indicators
             try:
                 cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS vip_free BOOLEAN DEFAULT FALSE")
+                # i18n columns (see services/indicator_translator.py)
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS source_language VARCHAR(16)")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS name_i18n JSONB")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS description_i18n JSONB")
             except Exception:
                 pass
             # 市场购买的副本不可改库中源码：应「另存为」新建 is_buy=0 的指标再编辑
@@ -595,6 +654,57 @@ def save_indicator():
                 indicator_id = int(cur.lastrowid or 0)
             db.commit()
             cur.close()
+
+        # ============================================================
+        # 多语言：发布到指标市场时同步触发 LLM 翻译
+        # ============================================================
+        # 设计取舍：
+        #   - 仅在 publish_to_community=1 时才翻译，私有指标不浪费 LLM 额度。
+        #   - 同步阻塞（一次调用约 2-5s）。如果以后 P99 超过用户耐心，可改成
+        #     后台 worker；现在保持同步是为了「保存成功 = 全语言立即可见」
+        #     最简单的 UX 契约。
+        #   - 翻译失败不会让保存失败：translate_indicator 内部 try/except，
+        #     返回 (None, None, src) 时下游接口仍能 fallback 到原文。
+        if publish_to_community and indicator_id > 0:
+            try:
+                ui_lang = (
+                    request.headers.get('X-App-Lang')
+                    or request.headers.get('Accept-Language', '').split(',')[0].strip()
+                    or 'en-US'
+                )
+                if ui_lang not in _SUPPORTED_LANGUAGES_FOR_TRANSLATE:
+                    ui_lang = None  # let translator auto-detect
+
+                name_i18n, desc_i18n, src_lang = translate_indicator(
+                    name=name,
+                    description=description,
+                    source_language=ui_lang,
+                )
+
+                with get_db_connection() as db:
+                    cur = db.cursor()
+                    cur.execute(
+                        """
+                        UPDATE qd_indicator_codes
+                        SET source_language = ?,
+                            name_i18n = ?,
+                            description_i18n = ?,
+                            updated_at = NOW()
+                        WHERE id = ? AND user_id = ?
+                        """,
+                        (
+                            src_lang,
+                            json.dumps(name_i18n, ensure_ascii=False) if name_i18n else None,
+                            json.dumps(desc_i18n, ensure_ascii=False) if desc_i18n else None,
+                            indicator_id,
+                            user_id,
+                        ),
+                    )
+                    db.commit()
+                    cur.close()
+            except Exception as _e:
+                # 翻译是 nice-to-have，永远不能让 save_indicator 失败。
+                logger.warning(f"save_indicator: i18n translation skipped: {_e}")
 
         return jsonify({"code": 1, "msg": "success", "data": {"id": indicator_id, "userid": user_id}})
     except Exception as e:
@@ -756,6 +866,28 @@ You write production-ready **QuantDinger** indicator scripts: Python that runs i
 - Do **not** use: `eval`, `exec`, `compile`, `open`, `__import__`, `getattr`/`setattr`/`delattr` on untrusted names, `globals`, `vars`, `dir`, or meta-programming to escape the sandbox. `locals()` is allowed if needed to assemble `output` (backtest/verify allow it); avoid `globals()`.
 - Work **vectorized** with pandas on `df` where possible; avoid O(n) Python loops over every row for core series (rolling/ewm/shift are preferred).
 
+# Series vs ndarray contract (critical — common AI bug source)
+
+This is the #1 reason hand/AI-translated Pine/TDX scripts crash at runtime ("AttributeError: 'numpy.ndarray' object has no attribute 'rolling' / 'fillna' / 'iloc' / 'shift' / 'ewm'"). Pine auto-coerces types; Python does not.
+
+Hard rules:
+
+- `np.where(...)`, `np.maximum(...)`, `np.minimum(...)`, `np.abs(...)` on a Series **may return either a Series or an ndarray** depending on numpy version. **Never chain pandas methods on their result without coercing.** Coerce explicitly: `pd.Series(arr, index=df.index)`.
+- A user-defined helper like `def safe_div(a, b): return np.where(b == 0, 0, a / b)` returns **ndarray**. If you want `.fillna` / `.rolling` / `.shift` / `.ewm` / `.tolist()` on it, wrap: `pd.Series(safe_div(a, b), index=df.index)`. Better: rewrite the helper to return a Series directly — e.g. `return (a / b.replace(0, np.nan)).fillna(0)`.
+- Any helper that uses `.iloc` (TDX-style `sma`, custom filters, etc.) **MUST receive a Series**. If you call it with `np.where(...)` output you will get AttributeError on the first iteration. Either coerce the argument or make the helper auto-coerce: `if not isinstance(src, pd.Series): src = pd.Series(np.asarray(src), index=df.index)`.
+- `pd.Series(some_ndarray)` defaults to a `RangeIndex 0..n-1`. If `df.index` is a `DatetimeIndex` (very common), the new Series will **silently misalign** with `df` columns in subsequent comparisons / `where` / arithmetic. **Always pass `index=df.index`** when wrapping an ndarray that is sized to `len(df)`.
+
+Prefer pandas-native operators that **stay in Series-land**:
+
+- `np.where(cond, a, b)`         → `a.where(cond, b)`     (returns Series when `a` is Series; `cond` aligned to `a`)
+- `np.where(cond, X, 0)`         → `X.where(cond, 0)` or `pd.Series(0, index=df.index).mask(cond, X)`
+- `np.maximum(s, 0)`             → `s.clip(lower=0)`
+- `np.minimum(s, k)`             → `s.clip(upper=k)`
+- `np.abs(s)`                    → `s.abs()`
+- division-by-zero protection    → `num / den.replace(0, np.nan)` then `.fillna(0)` (do NOT use `np.where(den == 0, ...)` if you need to chain pandas methods)
+
+Self-check before returning code: every place where you call `.rolling` / `.fillna` / `.shift` / `.ewm` / `.iloc` / `.tolist()` — trace back: is the left-hand side a **Series**? If it came from `np.where` / `np.maximum` / `np.minimum` / a custom helper, wrap it first.
+
 # Input: `df`
 
 - `df` is a pandas `DataFrame` aligned to K-line bars (one row per bar).
@@ -856,6 +988,8 @@ Pick defaults that match the strategy style (trend vs mean-reversion).
   2. `df['buy']` and `df['sell']` are assigned boolean Series
   3. every `plot['data']` and `signal['data']` length equals `len(df)`
   4. `output` exists and is a dict
+  5. **type audit**: scan every `.rolling` / `.fillna` / `.shift` / `.ewm` / `.iloc` / `.tolist` call site; confirm its left-hand side is a Series. If it came from `np.where` / `np.maximum` / `np.minimum` / a custom helper returning ndarray, you MUST wrap with `pd.Series(arr, index=df.index)` first
+  6. **index audit**: any `pd.Series(arr)` where `arr` is ndarray sized `len(df)` MUST pass `index=df.index`, otherwise it will silently misalign with DatetimeIndex-based `df`
 
 # Output format for this chat turn
 
@@ -869,6 +1003,15 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
             f"my_indicator_description = \"{(prompt or '').replace('\n', ' ')[:200]}\"\n\n"
         )
         body = (
+            "# ===== Strategy defaults (single source of truth) =====\n"
+            "# @strategy stopLossPct 0.03            # Hard stop-loss (3%)\n"
+            "# @strategy takeProfitPct 0.06          # Take-profit (6%)\n"
+            "# @strategy entryPct 1.0                # Use 100% of available capital per entry\n"
+            "# @strategy trailingEnabled false       # Set true to enable trailing stop\n"
+            "# @strategy trailingStopPct 0.02        # Trailing distance (2%)\n"
+            "# @strategy trailingActivationPct 0.03  # Activate trailing after +3% in profit\n"
+            "# @strategy tradeDirection long         # long | short | both\n\n"
+            "# ===== Indicator parameters =====\n"
             "# @param rsi_len int 14 RSI period\n\n"
             "rsi_len = params.get('rsi_len', 14)\n"
             "df = df.copy()\n\n"
@@ -1022,6 +1165,11 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
             "- Ensure df['buy'] and df['sell'] are boolean Series.\n"
             "- Ensure output exists and all plot/signal data lengths equal len(df).\n"
             "- For signal markers, prefer explicit None-or-price lists, not .where(..., None).tolist().\n"
+            "- **Series vs ndarray**: audit every `.rolling` / `.fillna` / `.shift` / `.ewm` / `.iloc` / `.tolist` call. "
+            "If its left-hand side came from `np.where` / `np.maximum` / `np.minimum` / any helper returning ndarray, "
+            "wrap with `pd.Series(arr, index=df.index)` first, or rewrite using pandas-native `.where` / `.clip` / `.abs` / "
+            "`(num / den.replace(0, np.nan)).fillna(0)`.\n"
+            "- Any custom helper that uses `.iloc` (TDX-style sma, etc.) must accept a Series; coerce inside if needed.\n"
             "- Return Python only, no markdown, no explanation."
         )
 
@@ -1186,16 +1334,60 @@ Return **only** valid Python source: **no** markdown fences, **no** ` ``` `, **n
 @login_required
 def code_quality_hints():
     """
-    Heuristic hints for indicator code (structure, @strategy risk/position).
+    Heuristic hints + runtime smoke-execution for indicator code.
+
     POST /api/indicator/codeQualityHints
-    Body: { "code": "..." }
+    Body:  { "code": "..." }
     Returns: { "code": 1, "data": { "hints": [ { "severity", "code", "params" } ] } }
+
+    The static pass catches structural/@strategy issues. We also do a short
+    sandboxed dry-run against a mock K-line frame so runtime errors (e.g.
+    `AttributeError: 'numpy.ndarray' has no attribute 'rolling'`) surface as
+    hints instead of staying invisible until backtest time. Static `error`
+    hints suppress the dry-run because they would deterministically fail
+    anyway and we want a fast response.
     """
     from app.services.indicator_code_quality import analyze_indicator_code_quality
 
     data = request.get_json() or {}
     code_str = data.get("code") or ""
     hints = analyze_indicator_code_quality(code_str)
+
+    # If static analysis already found a deterministic error, skip the dry-run.
+    # We do NOT skip on warn/info — those don't block execution and the user
+    # benefits from the runtime check finishing the picture.
+    has_static_error = any(h.get("severity") == "error" for h in hints)
+    if not has_static_error and code_str.strip():
+        try:
+            validation = _validate_indicator_code_internal(code_str)
+        except Exception as e:  # never let the smoke run break the endpoint
+            logger.warning("codeQualityHints dry-run crashed: %s", e)
+            validation = None
+
+        if validation is not None and not validation.get("success"):
+            error_type = validation.get("error_type") or "RuntimeError"
+            detail = validation.get("details") or validation.get("msg") or ""
+            # Trim noisy tracebacks: keep only the last meaningful line.
+            short_detail = ""
+            if detail:
+                for line in str(detail).strip().splitlines()[::-1]:
+                    line = line.strip()
+                    if line and not line.startswith("File "):
+                        short_detail = line[:300]
+                        break
+                if not short_detail:
+                    short_detail = str(detail).strip().splitlines()[-1][:300]
+            hints.append(
+                {
+                    "severity": "error",
+                    "code": "RUNTIME_ERROR_ON_VERIFY",
+                    "params": {
+                        "error_type": error_type,
+                        "detail": short_detail,
+                    },
+                }
+            )
+
     return jsonify({"code": 1, "data": {"hints": hints}})
 
 

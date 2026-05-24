@@ -36,7 +36,15 @@ fi
 # Auto-generate SECRET_KEY if using default (zero-config experience)
 if [ "$CURRENT_SECRET" = "$DEFAULT_SECRET" ]; then
     NEW_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-    sed -i "s|SECRET_KEY=.*|SECRET_KEY=${NEW_SECRET}|" /app/.env
+    # Use a temp file + write-back instead of `sed -i`. When /app/.env is a
+    # Docker bind-mount from the host (zero-repo GHCR deploy), `sed -i` fails
+    # with "Device or resource busy" because it tries to rename(2) the inode
+    # over a mount target. Truncate+write through the mount works fine and
+    # propagates the new key back to the host file.
+    TMP=$(mktemp)
+    sed "s|SECRET_KEY=.*|SECRET_KEY=${NEW_SECRET}|" /app/.env > "$TMP"
+    cat "$TMP" > /app/.env
+    rm -f "$TMP"
     echo "[AUTO] Generated random SECRET_KEY (was default)."
     echo "[TIP]  For production, set a persistent SECRET_KEY in backend_api_python/.env"
 fi

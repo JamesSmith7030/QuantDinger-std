@@ -13,6 +13,16 @@
       <a href="README.md"><strong>English</strong></a>
       <span style="color: #afb8c1;"> · </span>
       <a href="docs/README_CN.md"><strong>简体中文</strong></a>
+      <span style="color: #afb8c1;"> · </span>
+      <a href="docs/README_JA.md"><strong>日本語</strong></a>
+      <span style="color: #afb8c1;"> · </span>
+      <a href="docs/README_KO.md"><strong>한국어</strong></a>
+      <span style="color: #afb8c1;"> · </span>
+      <a href="docs/README_TH.md"><strong>ไทย</strong></a>
+      <span style="color: #afb8c1;"> · </span>
+      <a href="docs/README_VI.md"><strong>Tiếng Việt</strong></a>
+      <span style="color: #afb8c1;"> · </span>
+      <a href="docs/README_AR.md"><strong>العربية</strong></a>
     </p>
     <p style="margin: 0 0 18px; padding-bottom: 16px; border-bottom: 1px solid #eaeef2; line-height: 2;">
       <a href="https://ai.quantdinger.com"><strong>SaaS</strong></a>
@@ -36,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/v/release/brokermr810/QuantDinger?style=flat-square&color=orange&label=Version" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20image%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-Prebuilt-1f8b4c?style=flat-square" alt="Frontend">
@@ -55,25 +65,47 @@
 
 ---
 
-> QuantDinger is a **self-hosted, local-first** quantitative platform: **AI-assisted research**, **Python-native strategies**, **backtesting**, and **live trading** (crypto, IBKR stocks, MT5 forex) in one product—not a loose collection of scripts and SaaS tabs.
+## Contents
+
+[Quick start](#try-in-2-minutes) · [Repositories](#related-repositories) · [AI agents & MCP](#use-it-from-an-ai-agent-cursor--claude-code--codex--mcp) · [Overview](#product-overview) · [Features](#features-at-a-glance) · [Visual tour](#visual-tour) · [Architecture](#architecture) · [Install](#installation--first-time-setup-docker-compose) · [Docs](#documentation) · [FAQ](#faq) · [License](#license-and-commercial-terms)
+
+---
+
+> QuantDinger is a **self-hosted, local-first** quantitative platform: **AI-assisted research**, **Python-native strategies**, **backtesting**, and **live trading** (crypto, IBKR stocks, MT5 forex, Alpaca US stocks/ETFs/crypto) in one product—not a loose collection of scripts and SaaS tabs.
+
+<div align="center">
+  <img src="docs/screenshots/architecture.png" alt="QuantDinger system architecture: Data Sources → Indicator / Signal / Strategy / Backtesting / AI Analysis layers → Execution, with the closed-loop quant workflow (Idea → Indicator → Strategy → Backtest → Optimize → Execute → Monitor)" width="960">
+  <p><sub><em>End-to-end architecture: market data feeds the five-layer engine and exits to live execution, closing the quant loop from idea to monitoring.</em></sub></p>
+</div>
 
 ## Try in 2 minutes
 
-**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose (Docker Desktop on Windows/macOS, or Docker Engine + Compose plugin on Linux), and **Git**. Node.js is **not** required (prebuilt UI is in `frontend/dist`).
+> **Lightest path: pull images, start the stack — no `npm`, no Vue source folder, and no `docker compose up --build`.** The UI comes from GHCR (`quantdinger-frontend:latest` by default); only the backend is built locally on first boot.
 
-### macOS / Linux (Bash)
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose v2 (Docker Desktop on Windows/macOS). **Git** for the standard path below. **Node.js is not required.**
 
-One line (or run the same steps separately):
+### Lightest: two files only (no `git clone`)
+
+If you only need a running stack and can reach GHCR + Docker Hub (or a mirror):
 
 ```bash
-git clone https://github.com/brokermr810/QuantDinger.git && cd QuantDinger && cp backend_api_python/env.example backend_api_python/.env && chmod +x scripts/generate-secret-key.sh && ./scripts/generate-secret-key.sh && docker-compose up -d --build
+curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-If `./scripts/generate-secret-key.sh` fails with “Permission denied”, run `chmod +x scripts/generate-secret-key.sh` and retry. If `docker-compose` is not found, try `docker compose` (Compose V2).
+`SECRET_KEY` is auto-generated on first backend start. Open **`http://localhost:8888`**.
 
-### Windows (PowerShell)
+### Standard: clone this repo (recommended for config & docs)
 
-Use **PowerShell** (not CMD) in a folder where you want the project. **Docker Desktop** must be running (WSL2 backend recommended).
+**macOS / Linux (Bash) — one line**
+
+```bash
+git clone https://github.com/brokermr810/QuantDinger.git && cd QuantDinger && cp backend_api_python/env.example backend_api_python/.env && chmod +x scripts/generate-secret-key.sh && ./scripts/generate-secret-key.sh && docker compose pull && docker compose up -d
+```
+
+**Windows (PowerShell)** — folder name after clone is **`QuantDinger`** (same spelling as the GitHub repo; `cd quantdinger` also works on Windows when case-insensitive):
 
 ```powershell
 git clone https://github.com/brokermr810/QuantDinger.git
@@ -82,73 +114,94 @@ Copy-Item backend_api_python\env.example -Destination backend_api_python\.env
 $key = & python -c "import secrets; print(secrets.token_hex(32))" 2>$null
 if (-not $key) { $key = & py -c "import secrets; print(secrets.token_hex(32))" 2>$null }
 if (-not $key) { $key = & python3 -c "import secrets; print(secrets.token_hex(32))" 2>$null }
-if (-not $key) { Write-Error "Install Python 3 from python.org (tick 'Add to PATH') or use Git Bash with the macOS/Linux block above." }
+if (-not $key) { Write-Error "Install Python 3 from python.org (tick 'Add to PATH') or use Git Bash with the Bash one-liner above." }
 (Get-Content backend_api_python\.env) -replace '^SECRET_KEY=.*$', "SECRET_KEY=$key" | Set-Content backend_api_python\.env -Encoding utf8
-docker-compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-If `docker-compose` is not recognized, use **`docker compose`** (space, no hyphen). If Git is missing, install [Git for Windows](https://git-scm.com/download/win).
+Use **`docker compose`** (space). Legacy **`docker-compose`** (hyphen) works on many installs. **Git Bash** can run the Bash one-liner as-is.
 
-### Windows alternative: Git Bash
+<details>
+<summary><b>Do not use <code>docker compose up --build</code> for a normal install</b></summary>
 
-If you installed **Git for Windows**, open **Git Bash** and you can use the **macOS / Linux** one-liner above (Bash + `chmod` + `./scripts/generate-secret-key.sh`).
+A plain `docker compose up --build` does **not** rebuild the frontend — the main `docker-compose.yml` only declares `image:` for the frontend service, so `--build` only affects the backend. To rebuild the frontend from local Vue source you must opt in via the `docker-compose.build.yml` override (see below).
+
+| Goal | Command |
+|------|---------|
+| First-time / routine start | `docker compose pull` then `docker compose up -d` |
+| Rebuild **backend** only after code changes | `docker compose up -d --build backend` |
+| Hack on Vue UI from source | Clone [QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue) into `./QuantDinger-Vue/`, then `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build` |
+
+</details>
+
+<details>
+<summary><b>Slow or failed <code>docker pull</code> (China / VPN)</b></summary>
+
+System VPN often **does not** proxy Docker Desktop. Either configure **Docker Desktop → Settings → Proxies** (e.g. `http://127.0.0.1:7890` for Clash), or add to a **repository-root** `.env`:
+
+```ini
+IMAGE_PREFIX=docker.m.daocloud.io/library/
+```
+
+Then run `docker compose pull` again. Errors like `content size of zero` or `connectex` on `registry-1.docker.io` are registry/network issues, not application bugs.
+
+</details>
 
 ---
 
-Then open **`http://localhost:8888`**, sign in with **`quantdinger` / `123456`**, and **change the default admin password** before any real use. For prerequisites, configuration details, first-run checks, and troubleshooting, continue to **[Installation & first-time setup](#installation--first-time-setup-docker-compose)** below.
+Then open **`http://localhost:8888`**, sign in with **`quantdinger` / `123456`**, and **change the default admin password** before any real use.
 
-## What is QuantDinger?
+For step-by-step detail and troubleshooting, see **[Installation & first-time setup](#installation--first-time-setup-docker-compose)**.
 
-QuantDinger is built for people who want **one controlled environment** instead of stitching together chart apps, Jupyter, bots, and dashboards:
+## Related repositories
 
-- **Research**: AI-driven analysis, watchlists, and multi-market context (crypto, equities, forex, optional prediction-market workflows).
-- **Build**: Indicator-style (`IndicatorStrategy`) and script-style (`ScriptStrategy`) Python; optional natural-language → code to bootstrap.
-- **Validate**: Server-side backtests, metrics, and equity curves tied to the same strategy model you iterate in the UI.
-- **Operate**: Live strategies, quick trade, notifications, and execution adapters—credentials stay in **your** Postgres-backed vault and `.env`.
-- **Grow (optional)**: Multi-user patterns, credits, memberships, and USDT billing hooks for teams that ship a product, not only a personal bot.
+This repo ships the **backend**, **Docker Compose** stack, and **documentation**. The web UI image is published independently to GHCR by the sibling Vue repo. Use the sibling repos when you need source-level UI changes or the mobile app:
 
-If you are looking for an **open-source quant stack**, **self-hosted AI trading workspace**, or **NL → Python strategy workflow** with a real operator surface, this repository is the integration point.
+| Repository | What it is |
+|------------|------------|
+| **[QuantDinger](https://github.com/brokermr810/QuantDinger)** (this repo) | Backend (Flask/Python), Compose stack, docs |
+| **[QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)** | **Web frontend source** (Vue) — tagging `v*` publishes `ghcr.io/brokermr810/quantdinger-frontend` automatically |
+| **[QuantDinger-Mobile](https://github.com/brokermr810/QuantDinger-Mobile)** | **Open-source mobile client** — pairs with your self-hosted or SaaS backend |
 
-## Why QuantDinger? AI-Powered Quantitative Trading and Backtesting
+**Note:** Node.js is only required if you build the web UI from **QuantDinger-Vue**; the default Docker quick start pulls the published image and does not need it.
 
-- **Self-hosted by design**: your credentials, strategy code, market workflows, and operational data stay under your control.
-- **Research to execution in one product**: AI analysis, charting, strategy logic, backtests, quick trade, and live operations are connected.
-- **Python-native and AI-assisted**: write indicators and strategies directly in Python, or use AI to accelerate drafting and iteration.
-- **Built for operators, not just demos**: Docker Compose, PostgreSQL, Redis, Nginx, health checks, worker toggles, and environment-based configuration.
-- **Commercialization-ready**: memberships, credits, admin management, and USDT payment flows are already part of the stack.
+## Use it from an AI agent (Cursor / Claude Code / Codex / MCP)
 
-## The Core Promise
+QuantDinger ships an **Agent Gateway** at `/api/agent/v1` plus a small **MCP server** ([`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/) on PyPI) that wraps it as Model Context Protocol tools. Issue a token once and your AI client can read markets, manage strategies, run backtests, and (paper-only by default) place trades — without ever seeing your exchange keys or your admin JWT.
 
-QuantDinger gives you something most trading tools do not:
+> Every agent call is **audit-logged**, and trading-class tokens are **paper-only by default**. Live execution requires both `paper_only=false` on the token AND `AGENT_LIVE_TRADING_ENABLED=true` on the server.
 
-- **one stack instead of five** for research, strategy code, backtests, execution, alerts, and operations
-- **AI that sits inside the workflow**, not beside it
-- **Python flexibility without losing product UX**
-- **private deployment without giving up growth features**
+**Two backends, same client config — only `QUANTDINGER_BASE_URL` differs:**
 
-## QuantDinger vs Patchwork Setups
+- **Hosted (30 s try-out)** — sign up at [ai.quantdinger.com](https://ai.quantdinger.com) → **Sidebar → Agent Tokens** → Issue Token. Locked to `paper_only=true`, no real-money orders.
+- **Self-hosted (this repo)** — after the [Try in 2 minutes](#try-in-2-minutes) Docker bring-up, open `http://localhost:8888/#/agent-tokens`. You control scopes, allowlists, rate limits, and live-trading flag.
 
-| Typical Setup | QuantDinger |
-|---------------|-------------|
-| AI chat tool disconnected from real strategy workflows | AI analysis, AI code generation, backtest feedback, and execution workflows live in one product |
-| Separate charting app, Python scripts, bot runner, and notification stack | One deployable platform for charting, strategy logic, runtime services, and alerts |
-| Hosted SaaS with limited control over credentials and alpha | Self-hosted architecture with your own infra, keys, and operational data |
-| Research tools with no operator layer | Multi-user roles, billing, credits, admin controls, and deployment-ready configuration |
+Then point Cursor / Claude Code / Codex at the MCP server (`.cursor/mcp.json` template: [`docs/agent/cursor-mcp.example.json`](docs/agent/cursor-mcp.example.json)):
 
-## Who It Is For
+```json
+{ "mcpServers": { "quantdinger": {
+  "command": "uvx", "args": ["quantdinger-mcp"],
+  "env": { "QUANTDINGER_BASE_URL": "http://localhost:8888",
+           "QUANTDINGER_AGENT_TOKEN": "qd_agent_xxxxxxxx" }
+} } }
+```
 
-- **Traders and quants** who want AI-assisted market research without giving up control of infrastructure and data.
-- **Python strategy developers** who want charting, backtests, and live execution in one environment.
-- **Small teams and studios** building internal trading tools or private research platforms.
-- **Operators and founders** who need a deployable product with user management, billing, and admin controls.
+**Full setup recipe** — local stdio config, remote HTTP transport, Claude Code CLI helper, example agent prompts, audit-log walkthrough: **[`docs/agent/MCP_SETUP.md`](docs/agent/MCP_SETUP.md)**.
 
-## Use Cases
+Deeper references: [AI Integration design](docs/agent/AI_INTEGRATION_DESIGN.md) · [Quickstart with `curl`](docs/agent/AGENT_QUICKSTART.md) · [OpenAPI 3.0 spec](docs/agent/agent-openapi.json) · [MCP server README](mcp_server/README.md)
 
-- **AI-assisted market research** for crypto, stocks, forex, and cross-market workflows
-- **Python-native strategy development** for quantitative trading and algorithmic trading teams
-- **Backtesting and iteration** for signal strategies, saved strategies, and execution assumptions
-- **Private trading infrastructure** for teams that want self-hosted deployment and privacy-first operations
-- **Commercial trading products** that need users, billing, credits, and admin controls
+## Product overview
+
+QuantDinger is a **self-hosted** quantitative OS: **AI-assisted research**, **Python-native strategies** (`IndicatorStrategy` + `ScriptStrategy`), **backtesting**, and **live trading** (crypto, IBKR, MT5, Alpaca)—with optional multi-user roles, notifications, credits, and USDT billing. It replaces a patchwork of charts, notebooks, bots, and disconnected LLM chats with **one Compose stack** and **your** credentials in Postgres + `.env`.
+
+| Typical DIY stack | QuantDinger |
+|-------------------|-------------|
+| Chat AI separate from execution | Analysis, NL→code, backtests, and execution in one product |
+| Many tools wired by hand | Nginx + Vue UI, Flask API, workers, exchange/LLM adapters |
+| Opaque SaaS keys | Your infra, your exchange keys, your LLM keys |
+
+**Audience:** traders and quants, Python strategy authors, small teams building internal or commercial trading products.
 
 ## Visual Tour
 
@@ -178,142 +231,21 @@ QuantDinger gives you something most trading tools do not:
   </tr>
 </table>
 
-## What You Can Do With QuantDinger
+## Features at a glance
 
-### AI Research and Decision Support
+- **Research & AI** — Multi-LLM analysis, watchlists, analysis history; optional ensemble/calibration; NL→indicator/strategy; post-backtest AI hints. **[Agent Gateway + MCP](#use-it-from-an-ai-agent-cursor--claude-code--codex--mcp)** for Cursor / Claude Code / Codex.
+- **Build** — `IndicatorStrategy` (dataframe signals, chart overlays) and `ScriptStrategy` (`on_bar`, explicit orders); professional chart UI.
+- **Validate** — Server-side backtests, metrics, equity curves, strategy snapshots.
+- **Operate** — Crypto execution, quick trade, IBKR / MT5 / Alpaca (US stocks, ETFs, crypto), notifications (Telegram, email, SMS, Discord, webhooks). **Unified Broker Accounts page** centralises connection, account KPIs, positions and open-order management across all brokers.
+- **Platform** — Docker Compose, Postgres, Redis, OAuth, multi-user patterns, credits / membership / USDT billing toggles.
 
-- Run fast AI-driven market analysis across price action, kline structure, macro/news context, and selected external inputs.
-- Store analysis history and memory for repeatable review and future calibration.
-- Configure multiple LLM providers such as OpenRouter, OpenAI, Gemini, DeepSeek, and more.
-- Optionally enable ensemble and calibration-style flows for more robust AI outputs.
+## Architecture
 
-### Indicator and Strategy Development
+**Stack:** Nginx serves the prebuilt Vue app (published as `ghcr.io/brokermr810/quantdinger-frontend`); **Flask** API runs strategy/AI/billing services; **PostgreSQL** holds state; **Redis** backs workers. Exchanges, brokers, LLMs, and payments plug in through env-driven adapters. Crypto **market data** and **order execution** paths are separated by design.
 
-- Build `IndicatorStrategy` workflows for dataframe-based signals, chart overlays, and signal backtests.
-- Build `ScriptStrategy` workflows for stateful runtime logic, explicit order control, and live execution alignment.
-- Generate indicator or strategy code from natural language and refine it in Python.
-- Visualize indicators, buy/sell signals, and strategy output directly on professional chart interfaces.
+**Runtime (short):** data feeds → backtest/strategy engine → live runtime → exchange adapters; pending orders dispatched per venue.
 
-### Backtesting and Iteration
-
-- Run historical backtests with stored trades, metrics, and equity curves.
-- Backtest both indicator-driven logic and saved strategy records.
-- Persist strategy snapshots and review historical runs for reproducibility.
-- Use AI-assisted post-backtest analysis to improve parameters and execution assumptions.
-
-### Live Trading and Operations
-
-- Connect crypto exchanges through a unified execution layer.
-- Use quick-trade flows to go from analysis to action faster.
-- Monitor open positions, review trade history, and close positions from the platform.
-- Run automated or semi-automated strategy workflows with runtime services and workers.
-
-### Multi-Market Coverage
-
-- Crypto spot and derivatives
-- US stocks through IBKR
-- Forex through MT5
-- Prediction market research through Polymarket analysis workflows
-
-### Multi-User, Alerts, and Billing
-
-- PostgreSQL-backed multi-user system with role-based access patterns.
-- OAuth support for Google and GitHub.
-- Notification channels including Telegram, Email, SMS, Discord, and Webhooks.
-- Membership plans, credits, USDT TRC20 payments, and admin-side billing controls.
-
-## AI Capabilities
-
-QuantDinger is not just "LLM chat added to a trading app". The current AI layer is integrated into the actual research and strategy workflow.
-
-### Fast Analysis
-
-- Structured AI market analysis for quick decision support
-- Lower-latency workflow than older multi-hop orchestration
-- Useful for daily market review, trade planning, and opportunity screening
-
-### AI Strategy and Indicator Generation
-
-- Natural language to Python indicator code
-- Natural language to strategy code and config scaffolding
-- Better fit for traders who know the idea they want, but want to accelerate implementation
-
-### Analysis Memory and Review
-
-- Historical analysis storage
-- Better repeatability and comparison over time
-- A foundation for future calibration and reflection loops
-
-### Ensemble, Calibration, and Reflection
-
-- Optional multi-model ensemble configuration
-- Confidence calibration and reflection-style worker support
-- Better operational path for teams that want more stable AI-assisted workflows
-
-### AI-Assisted Backtest Feedback
-
-- Backtest outputs can feed into AI-generated suggestions
-- Useful for parameter tuning, risk adjustments, and faster iteration
-
-### Polymarket and Cross-Market Research
-
-- Analyze prediction markets as a research workflow
-- Compare AI view versus market-implied probabilities
-- Surface divergence and opportunity scoring
-
-## Why It Is Different
-
-Most trading stacks give you one or two of these pieces. QuantDinger aims to give you the full operating system:
-
-1. **Self-hosted infrastructure**
-2. **AI research workflows**
-3. **Python strategy development**
-4. **Backtesting**
-5. **Live execution**
-6. **Portfolio and notification operations**
-7. **Commercialization primitives**
-
-That combination is the core difference.
-
-## Why It Converts Better Than a Typical Trading Tool
-
-- **For traders**: it shortens the path from idea to execution.
-- **For quants**: it keeps Python and strategy control front and center.
-- **For operators**: it adds the parts most open-source trading projects skip, including users, billing, roles, and deployability.
-- **For AI-first workflows**: it turns analysis into something actionable, reviewable, and eventually automatable.
-
-## How It Works
-
-At a practical level, QuantDinger runs as a self-hosted application stack:
-
-- a prebuilt Vue frontend served by Nginx
-- a Flask API backend with Python services
-- PostgreSQL for state, users, strategies, and history
-- Redis for worker support and runtime coordination
-- exchange, broker, AI, payment, and notification integrations through configurable adapters
-
-### Architecture Summary
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Prebuilt Vue application served by Nginx |
-| Backend | Flask API, Python services, strategy runtime |
-| Storage | PostgreSQL 16 |
-| Cache / worker support | Redis 7 |
-| Trading layer | Exchange adapters, IBKR, MT5 |
-| AI layer | LLM provider integration, memory, calibration, optional workers |
-| Billing | Membership, credits, USDT TRC20 payment flow |
-| Deployment | Docker Compose with health checks |
-
-### Execution Model
-
-- Market data is pulled through a pluggable data layer.
-- Backtests run on the server-side strategy engine, including strategy snapshot handling.
-- Live strategies run through runtime services that generate order intent.
-- Pending orders are then dispatched through exchange-specific execution adapters.
-- Crypto live execution is intentionally separated from market-data collection concerns.
-
-### System Diagram
+### System diagram
 
 ```mermaid
 flowchart LR
@@ -341,7 +273,7 @@ flowchart LR
     subgraph EXT[External Integrations]
         LLM[LLM Providers]
         EXCH[Crypto Exchanges]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
         MARKET[Market Data / News]
         PAY[TronGrid / USDT Payment]
         NOTIFY[Telegram / Email / SMS / Webhook]
@@ -371,7 +303,9 @@ flowchart LR
 
 ## Installation & first-time setup (Docker Compose)
 
-This section mirrors a typical “local deploy” path: **prepare the host → obtain the code → configure secrets → start the stack → verify → harden → optionally wire AI**. Node.js is **not** required: the repo ships a **prebuilt** UI under `frontend/dist` and Nginx serves it inside the `frontend` container.
+> **Already ran [Try in 2 minutes](#try-in-2-minutes)?** Skip this section — it's the same outcome, just expanded into a step-by-step checklist for first-time deployers and operations folks who want to understand every knob.
+
+This section mirrors a typical “local deploy” path: **prepare the host → obtain the code → configure secrets → start the stack → verify → harden → optionally wire AI**. Node.js is **not** required: the `frontend` service pulls `ghcr.io/brokermr810/quantdinger-frontend` directly, so Nginx serves the SPA without any local build step.
 
 ### Prerequisites
 
@@ -414,10 +348,54 @@ The script overwrites the `SECRET_KEY=` line in `backend_api_python/.env` using 
 ### 4) Start the stack
 
 ```bash
-docker-compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Services: **`postgres`**, **`redis`**, **`backend`**, **`frontend`** (see `docker-compose.yml` for healthchecks and port mappings).
+- **`frontend`** — pulls `ghcr.io/brokermr810/quantdinger-frontend:latest` (no local Vue tree required).
+- **`backend`** — built from `./backend_api_python` on first start if no local image exists yet.
+- For UI development from Vue source, clone **QuantDinger-Vue** into `./QuantDinger-Vue/` and add `-f docker-compose.build.yml` to the command (see *Build the frontend from Vue source* below).
+
+Services: **`postgres`**, **`redis`**, **`backend`**, **`frontend`** (see `docker-compose.yml`).
+
+#### Alternative: zero-repo install from GHCR (lightest)
+
+Prebuilt multi-arch (amd64/arm64) images for **both** backend and frontend — no `git clone`:
+
+```bash
+curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `backend.env` for persistent overrides (API keys, OAuth, broker credentials). Compose orchestration knobs go in a separate `.env` (optional) — e.g. pin a version:
+
+```env
+# Common case: lockstep both sides to one tag
+IMAGE_TAG=3.0.10
+
+# Advanced (opt-in): decouple sides. Either var alone overrides only
+# that side; the other still follows IMAGE_TAG.
+# BACKEND_TAG=v3.0.9
+# FRONTEND_TAG=v3.1.0-rc1
+
+# BACKEND_IMAGE=ghcr.io/<your-fork>/quantdinger-backend     # optional, for forks
+# FRONTEND_IMAGE=ghcr.io/<your-fork>/quantdinger-frontend
+```
+
+Tag resolution: `BACKEND_TAG` / `FRONTEND_TAG` → `IMAGE_TAG` → compose default (`latest`). Without a root `.env`, both compose files pull `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. Pin a specific release by setting `IMAGE_TAG` (lockstep) or `BACKEND_TAG` / `FRONTEND_TAG` (per-side) — see [GitHub Releases](https://github.com/brokermr810/QuantDinger/releases) for available tags.
+
+#### Alternative: build the frontend from Vue source
+
+If you have access to the **QuantDinger-Vue** repo and want to iterate on UI source (theme tweaks, forks, debugging) instead of pulling the published image, clone it into the `./QuantDinger-Vue/` slot at the repo root (gitignored) and let Compose build from there:
+
+```bash
+git clone https://github.com/brokermr810/QuantDinger-Vue.git QuantDinger-Vue
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+The main `docker-compose.yml` only pulls the GHCR image; the override file `docker-compose.build.yml` adds the local `build:` block. Without the override, `./QuantDinger-Vue/` does not need to exist. Point `FRONTEND_SRC_PATH=/abs/path/to/QuantDinger-Vue` if you'd rather keep the source somewhere else, or set `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in a root `.env` to skip the long `-f -f` invocation. The locally built image is tagged the same way as the published one (`FRONTEND_TAG` / `IMAGE_TAG` rules apply), so it slots into the rest of the stack with no further changes.
 
 ### 5) Verify and sign in
 
@@ -444,11 +422,12 @@ Use **Docker Desktop** (WSL2 backend recommended). From PowerShell in the repo r
 
 ```powershell
 git clone https://github.com/brokermr810/QuantDinger.git
-cd QuantDinger
+Set-Location QuantDinger
 Copy-Item backend_api_python\env.example -Destination backend_api_python\.env
 $key = py -c "import secrets; print(secrets.token_hex(32))"
 (Get-Content backend_api_python\.env) -replace '^SECRET_KEY=.*$', "SECRET_KEY=$key" | Set-Content backend_api_python\.env -Encoding UTF8
-docker-compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 If `py` is not on PATH, use `python` or `python3` in the one-liner that generates `$key`. Line endings should remain UTF-8; avoid editors that strip newlines from `.env`.
@@ -457,7 +436,9 @@ If `py` is not on PATH, use `python` or `python3` in the one-liner that generate
 
 | Symptom | What to check |
 |---------|----------------|
-| Backend exits immediately | `SECRET_KEY` still default, or invalid `.env` syntax. Read `docker-compose logs backend`. |
+| `QuantDinger-Vue` not found | You added `-f docker-compose.build.yml` without cloning Vue source. Drop the override (plain `docker compose up -d`) or clone into `./QuantDinger-Vue/` first. |
+| `redis` / `python` / `node` pull fails, `content size of zero` | Docker Hub unreachable from Docker Desktop. Set root `.env` `IMAGE_PREFIX=docker.m.daocloud.io/library/` and/or configure **Docker Desktop → Proxies** (system VPN alone is often not enough). |
+| Backend exits immediately | `SECRET_KEY` still default, or invalid `.env` syntax. Read `docker compose logs backend`. |
 | Blank page or API errors from browser | `FRONTEND_URL` / origins mismatch; API not reachable from the host you opened. |
 | Port already in use | Another Postgres, Redis, or local service on `5432` / `6379` / `5000` / `8888`. Adjust variables in root `.env` per `docker-compose.yml`. |
 | Many live strategies, “start denied” | Raise `STRATEGY_MAX_THREADS` in `backend_api_python/.env` and restart API (see comments in `env.example`). |
@@ -465,11 +446,13 @@ If `py` is not on PATH, use `python` or `python3` in the one-liner that generate
 ### Common Docker commands
 
 ```bash
-docker-compose ps
-docker-compose logs -f backend
-docker-compose restart backend
-docker-compose up -d --build
-docker-compose down
+docker compose ps
+docker compose logs -f backend
+docker compose restart backend
+docker compose pull
+docker compose up -d
+docker compose up -d --build backend   # backend code changes only
+docker compose down
 ```
 
 ### Optional root `.env` (Compose only)
@@ -540,13 +523,12 @@ See full examples:
 
 | Market | Broker / Source | Execution |
 |--------|------------------|-----------|
-| US Stocks | IBKR, Yahoo Finance, Finnhub | Via IBKR |
+| US Stocks | IBKR, Alpaca, Yahoo Finance, Finnhub | Via IBKR or Alpaca (paper + live) |
+| ETFs | Alpaca | Via Alpaca (paper + live) |
 | Forex | MT5, OANDA | Via MT5 |
 | Futures | Exchange and data integrations | Data and workflow support |
 
-### Prediction Markets
-
-Polymarket is currently supported as a **research and analysis workflow**, not as direct in-platform live execution. It is useful for market lookup, divergence analysis, opportunity scoring, and AI-assisted review.
+> **Broker Accounts page (`/broker-accounts`, v3.0.5+)** — IBKR, MT5 and Alpaca share a single unified management page: per-broker connect form, account KPIs, positions table and open-order management with one-click cancel. Multi-tenant safe: each user's session is isolated via `BrokerSessionRegistry`, so one user reconnecting doesn't kick everyone else off.
 
 ## Strategy Development Modes
 
@@ -583,12 +565,8 @@ QuantDinger/
 │   ├── migrations/init.sql  # Database initialization
 │   ├── env.example          # Main environment template
 │   └── Dockerfile
-├── frontend/                # Prebuilt frontend delivery package
-│   ├── dist/
-│   ├── Dockerfile
-│   └── nginx.conf
 ├── docs/                    # Product, strategy, and deployment documentation
-├── docker-compose.yml
+├── docker-compose.yml       # Web UI via GHCR; optional ./QuantDinger-Vue/ for local UI builds
 ├── LICENSE
 └── TRADEMARKS.md
 ```
@@ -614,38 +592,18 @@ Use `backend_api_python/env.example` as the primary template. Key areas include:
 
 ## Documentation
 
-### Core Guides
+| Doc | Notes |
+|-----|--------|
+| [Changelog](docs/CHANGELOG.md) | Releases & migrations |
+| [README (中文)](docs/README_CN.md) | Chinese overview |
+| [JA](docs/README_JA.md) · [KO](docs/README_KO.md) · [TH](docs/README_TH.md) · [VI](docs/README_VI.md) · [AR](docs/README_AR.md) | Concise localized READMEs (Japanese, Korean, Thai, Vietnamese, Arabic) |
+| [Cloud deployment](docs/CLOUD_DEPLOYMENT_EN.md) | HTTPS, reverse proxy, production |
+| [Multi-user](docs/multi-user-setup.md) | Postgres multi-tenant patterns |
+| [Agent environment](docs/agent/AGENT_ENVIRONMENT_DESIGN.md) · [AI integration](docs/agent/AI_INTEGRATION_DESIGN.md) · [Quickstart](docs/agent/AGENT_QUICKSTART.md) · [OpenAPI](docs/agent/agent-openapi.json) · [MCP server](mcp_server/README.md) | Coding agents & MCP (`quantdinger-mcp` on PyPI) |
 
-| Document | Description |
-|----------|-------------|
-| [Changelog](docs/CHANGELOG.md) | Version history and migration notes |
-| [Chinese Overview](docs/README_CN.md) | Chinese product overview |
-| [Multi-User Setup](docs/multi-user-setup.md) | PostgreSQL multi-user deployment |
-| [Cloud Deployment](docs/CLOUD_DEPLOYMENT_EN.md) | Domain, HTTPS, reverse proxy, and cloud rollout |
+**Strategy:** [EN](docs/STRATEGY_DEV_GUIDE.md) · [CN](docs/STRATEGY_DEV_GUIDE_CN.md) · [TW](docs/STRATEGY_DEV_GUIDE_TW.md) · [JA](docs/STRATEGY_DEV_GUIDE_JA.md) · [KO](docs/STRATEGY_DEV_GUIDE_KO.md) · [Cross-sectional EN](docs/CROSS_SECTIONAL_STRATEGY_GUIDE_EN.md) / [CN](docs/CROSS_SECTIONAL_STRATEGY_GUIDE_CN.md) · [Examples](docs/examples/)
 
-### Strategy Development
-
-| Guide | EN | CN | TW | JA | KO |
-|-------|----|----|----|----|----|
-| Strategy Development | [EN](docs/STRATEGY_DEV_GUIDE.md) | [CN](docs/STRATEGY_DEV_GUIDE_CN.md) | [TW](docs/STRATEGY_DEV_GUIDE_TW.md) | [JA](docs/STRATEGY_DEV_GUIDE_JA.md) | [KO](docs/STRATEGY_DEV_GUIDE_KO.md) |
-| Cross-Sectional Strategy | [EN](docs/CROSS_SECTIONAL_STRATEGY_GUIDE_EN.md) | [CN](docs/CROSS_SECTIONAL_STRATEGY_GUIDE_CN.md) | - | - | - |
-| Examples | [examples](docs/examples/) | - | - | - | - |
-
-### Integrations
-
-| Topic | English | Chinese |
-|-------|---------|---------|
-| IBKR | [Guide](docs/IBKR_TRADING_GUIDE_EN.md) | - |
-| MT5 | [Guide](docs/MT5_TRADING_GUIDE_EN.md) | [Guide](docs/MT5_TRADING_GUIDE_CN.md) |
-| OAuth | [Guide](docs/OAUTH_CONFIG_EN.md) | [Guide](docs/OAUTH_CONFIG_CN.md) |
-
-### Notifications
-
-| Channel | English | Chinese |
-|---------|---------|---------|
-| Telegram | [Setup](docs/NOTIFICATION_TELEGRAM_CONFIG_EN.md) | [Config](docs/NOTIFICATION_TELEGRAM_CONFIG_CH.md) |
-| Email | [Setup](docs/NOTIFICATION_EMAIL_CONFIG_EN.md) | [Config](docs/NOTIFICATION_EMAIL_CONFIG_CH.md) |
-| SMS | [Setup](docs/NOTIFICATION_SMS_CONFIG_EN.md) | [Config](docs/NOTIFICATION_SMS_CONFIG_CH.md) |
+**Integrations & alerts:** [IBKR](docs/IBKR_TRADING_GUIDE_EN.md) · [MT5 EN](docs/MT5_TRADING_GUIDE_EN.md) / [CN](docs/MT5_TRADING_GUIDE_CN.md) · [OAuth EN](docs/OAUTH_CONFIG_EN.md) / [CN](docs/OAUTH_CONFIG_CN.md) · Telegram / Email / SMS configs under [`docs/`](docs/) (`NOTIFICATION_*`).
 
 ## FAQ
 
@@ -655,7 +613,7 @@ Yes. The default deployment model is your own Docker Compose stack with your own
 
 ### Is QuantDinger only for crypto trading?
 
-No. Crypto is a major focus, but the platform also includes IBKR workflows for US stocks, MT5 workflows for forex, and Polymarket research support.
+No. Crypto is a major focus, but the platform also includes IBKR and Alpaca workflows for US stocks / ETFs (Alpaca additionally covers crypto) and MT5 workflows for forex.
 
 ### Can I write strategies directly in Python?
 
@@ -667,14 +625,11 @@ It is both. QuantDinger is built to connect AI research, charting, strategy deve
 
 ### Can I use QuantDinger commercially?
 
-The backend is licensed under Apache 2.0. The frontend source has a separate source-available license. Commercial use is supported, but you should review the licensing terms in this repository and contact the project for frontend/commercial authorization if needed.
+The backend is licensed under Apache 2.0. The **web** frontend source ([QuantDinger-Vue](https://github.com/brokermr810/QuantDinger-Vue)) uses a separate source-available license—review both and contact the project for commercial frontend authorization if needed. The **[mobile app repo](https://github.com/brokermr810/QuantDinger-Mobile)** is open source under its own license (see that repository).
 
-## Open Source Repositories
+### Is there a mobile app?
 
-| Repository | Purpose |
-|------------|---------|
-| [QuantDinger](https://github.com/brokermr810/QuantDinger) | Main repository: backend, deployment stack, docs, prebuilt frontend delivery |
-| [QuantDinger Frontend](https://github.com/brokermr810/QuantDinger-Vue) | Vue frontend source repository for UI development and customization |
+Yes—see **[QuantDinger-Mobile](https://github.com/brokermr810/QuantDinger-Mobile)** (open source). It connects to the same backend you self-host or to SaaS.
 
 ## Exchange Partner Links
 
@@ -705,20 +660,7 @@ For commercial licensing, frontend source access, branding authorization, or dep
 
 ## Legal Notice and Compliance
 
-- QuantDinger is provided for lawful research, education, system development, and compliant trading or operational use only.
-- No individual or organization may use this software, any derivative work, or any related service for unlawful, fraudulent, abusive, deceptive, market-manipulative, sanctions-violating, money-laundering, or other prohibited activity.
-- Any commercial use, deployment, operation, resale, or service offering based on QuantDinger must comply with all applicable laws, regulations, licensing requirements, sanctions rules, tax rules, data-protection rules, consumer-protection rules, and market or exchange rules in the jurisdictions where it is used.
-- Users are solely responsible for determining whether their use of the software is lawful in their country or region, and for obtaining any approvals, registrations, disclosures, or professional advice required by applicable law.
-- QuantDinger, its copyright holders, contributors, licensors, maintainers, and affiliated open-source participants do not provide legal, tax, investment, compliance, or regulatory advice.
-- To the maximum extent permitted by applicable law, QuantDinger and all related contributors and rights holders disclaim responsibility and liability for any unlawful use, regulatory breach, trading loss, service interruption, enforcement action, or other consequence arising from the use or misuse of the software.
-
-## Start Here
-
-- **Want to see the product first?** Open the [official SaaS](https://ai.quantdinger.com) or watch the [Video Demo](https://www.youtube.com/watch?v=tNAZ9uMiUUw).
-- **Want to self-host quickly?** Use [Try in 2 minutes](#try-in-2-minutes) for a one-liner, then follow [Installation & first-time setup](#installation--first-time-setup-docker-compose) for the full checklist.
-- **Want to build strategies?** Read the [Strategy Development Guide](docs/STRATEGY_DEV_GUIDE.md). Example scripts live in [`docs/examples/`](docs/examples/) and are kept aligned with the guide.
-- **Want cloud or production deployment?** Use the [Cloud Deployment Guide](docs/CLOUD_DEPLOYMENT_EN.md).
-- **Want to license or customize it for a business?** Contact the team through [quantdinger.com](https://quantdinger.com).
+QuantDinger is intended for **lawful** research, education, and compliant trading only—not for fraud, market manipulation, sanctions evasion, money laundering, or other illegal activity. Operators must follow applicable laws, licensing, and exchange rules in every jurisdiction where they deploy. **This project does not provide legal, tax, investment, or regulatory advice.** You use the software at your own risk; to the extent permitted by law, contributors disclaim liability for trading losses, service interruption, or regulatory enforcement arising from use or misuse.
 
 ## Community and Support
 
@@ -759,5 +701,9 @@ QuantDinger stands on top of a strong open-source ecosystem. Special thanks to p
 - [ECharts](https://echarts.apache.org/)
 - [Capacitor](https://capacitorjs.com/)
 - [bip-utils](https://github.com/ebellocchia/bip_utils)
+
+## P.S. — A Note on the Name
+
+**QuantDinger** is a small tribute to **[Erwin Schrödinger](https://en.wikipedia.org/wiki/Erwin_Schr%C3%B6dinger)** — the "-dinger" in our name is the tail of "Schrödinger". The cat in the box was a thought experiment; every un-fired strategy is its own little version of it — simultaneously winning and losing until the order actually fills. Backtests open the box. Live trading collapses the wavefunction. Trade carefully.
 
 <p align="center"><sub>If QuantDinger is useful to you, a GitHub star helps the project a lot.</sub></p>

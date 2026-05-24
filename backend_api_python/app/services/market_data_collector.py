@@ -76,7 +76,6 @@ class MarketDataCollector:
         timeframe: str = "1D",
         include_macro: bool = True,
         include_news: bool = True,
-        include_polymarket: bool = True,  # 新增：是否包含预测市场数据
         timeout: int = 30
     ) -> Dict[str, Any]:
         """
@@ -88,7 +87,6 @@ class MarketDataCollector:
             timeframe: K线周期
             include_macro: 是否包含宏观数据
             include_news: 是否包含新闻
-            include_polymarket: 是否包含预测市场数据
             timeout: 总超时时间(秒)
             
         Returns:
@@ -114,8 +112,6 @@ class MarketDataCollector:
             # 情绪
             "news": [],
             "sentiment": {},
-            # 预测市场
-            "polymarket": [],
             # 元数据
             "_meta": {
                 "success_items": [],
@@ -203,17 +199,6 @@ class MarketDataCollector:
             except Exception as e:
                 logger.warning(f"News fetch failed: {e}")
                 data["_meta"]["failed_items"].append("news")
-        
-        # === 阶段4: 预测市场数据 (如果需要) ===
-        if include_polymarket:
-            try:
-                polymarket_events = self._get_polymarket_events(symbol, market)
-                data["polymarket"] = polymarket_events
-                if polymarket_events:
-                    data["_meta"]["success_items"].append("polymarket")
-            except Exception as e:
-                logger.debug(f"Polymarket data fetch failed: {e}")
-                data["_meta"]["failed_items"].append("polymarket")
         
         # 记录总耗时
         data["_meta"]["duration_ms"] = int((time.time() - start_time) * 1000)
@@ -2083,128 +2068,6 @@ class MarketDataCollector:
             logger.debug(f"Failed to get global major events: {e}")
             return []
     
-    def _get_polymarket_events(self, symbol: str, market: str) -> List[Dict]:
-        """
-        获取与资产相关的预测市场事件
-        直接调用Polymarket API获取实时数据，不依赖本地数据库
-        
-        Args:
-            symbol: 资产符号
-            market: 市场类型
-            
-        Returns:
-            相关预测市场事件列表
-        """
-        try:
-            from app.data_sources.polymarket import PolymarketDataSource
-            
-            polymarket_source = PolymarketDataSource()
-            
-            # 提取关键词
-            keywords = self._extract_polymarket_keywords(symbol, market)
-            logger.info(f"Extracted Polymarket keywords for {symbol}: {keywords}")
-            
-            # 优化：使用缓存加速，减少API调用时间
-            # 对于AI分析，使用短期缓存（5分钟）即可，既保证时效性又提升性能
-            # 进一步优化：限制关键词数量，只搜索最重要的关键词（最多2个）
-            related_markets = []
-            max_keywords = 2  # 最多只搜索2个关键词，减少API调用
-            for keyword in keywords[:max_keywords]:
-                try:
-                    # 使用use_cache=True启用缓存，减少API调用时间
-                    markets = polymarket_source.search_markets(keyword, limit=5, use_cache=True)
-                    logger.info(f"Found {len(markets)} markets for keyword '{keyword}' (cached)")
-                    related_markets.extend(markets)
-                except Exception as e:
-                    logger.warning(f"Failed to search Polymarket for keyword '{keyword}': {e}")
-                    continue
-            
-            # 去重
-            seen = set()
-            result = []
-            for market_data in related_markets:
-                market_id = market_data.get('market_id')
-                if market_id and market_id not in seen:
-                    seen.add(market_id)
-                    # 构建正确的 Polymarket URL
-                    # 优先使用已有的 polymarket_url，如果没有则根据 slug 或 market_id 构建
-                    polymarket_url = market_data.get('polymarket_url')
-                    if not polymarket_url:
-                        slug = market_data.get('slug')
-                        if slug and not str(slug).isdigit() and ('-' in str(slug) or any(c.isalpha() for c in str(slug))):
-                            # 使用有效的 slug
-                            polymarket_url = f"https://polymarket.com/event/{slug}"
-                        else:
-                            # 使用 markets 端点（更可靠）
-                            polymarket_url = f"https://polymarket.com/markets/{market_id}"
-                    
-                    result.append({
-                        "market_id": market_id,
-                        "question": market_data.get('question', ''),
-                        "current_probability": market_data.get('current_probability', 50.0),
-                        "volume_24h": market_data.get('volume_24h', 0),
-                        "liquidity": market_data.get('liquidity', 0),
-                        "category": market_data.get('category', 'other'),
-                        "polymarket_url": polymarket_url
-                    })
-            
-            logger.info(f"Total {len(result)} unique Polymarket events found for {symbol}")
-            return result
-        except Exception as e:
-            logger.debug(f"Failed to get polymarket events for {symbol}: {e}")
-            return []
-    
-    def _extract_polymarket_keywords(self, symbol: str, market: str) -> List[str]:
-        """
-        提取用于搜索预测市场的关键词
-        优化：只保留最重要的关键词，减少API调用次数
-        """
-        keywords = []
-        
-        # 基础符号（最重要）
-        if '/' in symbol:
-            base = symbol.split('/')[0]
-            keywords.append(base)
-        else:
-            keywords.append(symbol)
-        
-        # 加密货币全名映射（只保留一个最重要的全名，避免重复）
-        crypto_names = {
-            'BTC': 'Bitcoin',
-            'ETH': 'Ethereum',
-            'SOL': 'Solana',
-            'BNB': 'Binance',
-            'XRP': 'Ripple',
-            'ADA': 'Cardano',
-            'DOGE': 'Dogecoin',
-            'AVAX': 'Avalanche',
-            'DOT': 'Polkadot',
-            'POL': 'Polygon'
-        }
-        
-        base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
-        if base_symbol in crypto_names:
-            # 只添加一个全名，避免大小写重复
-            keywords.append(crypto_names[base_symbol])
-        
-        # 优化：移除通用关键词（如 '$100k', 'ETF', 'approval'），这些会匹配到很多不相关的市场
-        # 只保留与资产直接相关的关键词，最多2-3个
-        
-        # 去重并限制数量（最多3个关键词）
-        unique_keywords = []
-        seen = set()
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower not in seen:
-                seen.add(kw_lower)
-                unique_keywords.append(kw)
-                if len(unique_keywords) >= 3:  # 最多3个关键词
-                    break
-        
-        logger.info(f"Extracted {len(unique_keywords)} Polymarket keywords (optimized from {len(keywords)}): {unique_keywords}")
-        return unique_keywords
-
-
 # 全局实例
 _collector: Optional[MarketDataCollector] = None
 
