@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from app.services.backtest import BacktestService
 from app.services.experiment.evolution import StrategyEvolutionService
+from app.services.experiment.overrides import enrich_experiment_candidate, enrich_experiment_overrides
 from app.services.experiment.optimizers import make_optimizer
 from app.services.experiment.prompts import (
     SYSTEM_PROMPT,
@@ -318,7 +319,7 @@ class ExperimentRunnerService:
                 'trade_direction': snap.get('trade_direction', 'long'),
                 'market_type': 'swap',
                 'strategy_config': strategy_config,
-                'enable_mtf': snap.get('enable_mtf', True),
+                'strict_mode': snap.get('strict_mode', True),
             },
             'exchange_config': {},
         }
@@ -517,7 +518,7 @@ class ExperimentRunnerService:
                     logger.error("structured_tune backtest failed for %s: %s", candidate.get('name'), exc)
                     result = {}
                 score = scorer.score_result(result, regime=regime)
-                ranked.append({
+                ranked.append(enrich_experiment_candidate({
                     'name': candidate['name'],
                     'reasoning': '',
                     'source': candidate['source'],
@@ -525,7 +526,7 @@ class ExperimentRunnerService:
                     'snapshot': candidate['snapshot'],
                     'score': score,
                     'result': self._slim_result(result),
-                })
+                }))
 
         ranked = scorer.rank_results(ranked)
         if oos_start is not None and oos_end is not None:
@@ -560,7 +561,7 @@ class ExperimentRunnerService:
                 'elapsed': elapsed,
                 'error': None,
             }],
-            'rankedStrategies': ranked[:50],
+            'rankedStrategies': [enrich_experiment_candidate(c) for c in ranked[:50]],
             'bestStrategyOutput': self._build_best_output(best),
             'oosValidation': oos_meta,
             'scoringWeights': scorer.resolve_weights(regime),
@@ -790,7 +791,7 @@ class ExperimentRunnerService:
                 'indicator_params': base.get('indicatorParams') or {},
                 'indicator_id': base.get('indicatorId'),
                 'user_id': user_id,
-                'enable_mtf': bool(base.get('enableMtf', True)),
+                'strict_mode': bool(base.get('strictMode', base.get('strict_mode', True))),
                 'run_type': str(base.get('runType') or 'indicator'),
             }
         snapshot['user_id'] = user_id
@@ -798,8 +799,12 @@ class ExperimentRunnerService:
 
     @staticmethod
     def _parse_dates(base: Dict[str, Any]) -> tuple[datetime, datetime]:
-        start_date = datetime.strptime(str(base.get('startDate')), '%Y-%m-%d')
-        end_date = datetime.strptime(str(base.get('endDate')), '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        start_raw = base.get('startDate') or base.get('start_date')
+        end_raw = base.get('endDate') or base.get('end_date')
+        if not start_raw or not end_raw:
+            raise ValueError('startDate/start_date and endDate/end_date are required (YYYY-MM-DD)')
+        start_date = datetime.strptime(str(start_raw), '%Y-%m-%d')
+        end_date = datetime.strptime(str(end_raw), '%Y-%m-%d').replace(hour=23, minute=59, second=59)
         return start_date, end_date
 
     @staticmethod
@@ -922,7 +927,7 @@ class ExperimentRunnerService:
             'name': best.get('name'),
             'score': best.get('score'),
             'source': best.get('source'),
-            'overrides': best.get('overrides'),
+            'overrides': enrich_experiment_overrides(best.get('overrides') or {}),
             'snapshot': best.get('snapshot'),
             'summary': {
                 'totalReturn': result.get('totalReturn'),
