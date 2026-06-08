@@ -89,7 +89,7 @@ ADVANCED_KEYS = {
     'OPENROUTER_TEMPERATURE',
     'AI_ANALYSIS_CONSENSUS_TIMEFRAMES',
     'AI_CODE_GEN_MODEL',
-    'OPENAI_BASE_URL', 'DEEPSEEK_BASE_URL', 'GROK_BASE_URL', 'MINIMAX_BASE_URL',
+    'OPENAI_BASE_URL', 'DEEPSEEK_BASE_URL', 'GROK_BASE_URL', 'ATLASCLOUD_BASE_URL', 'MINIMAX_BASE_URL',
     # Trading internals
     'MAKER_WAIT_SEC',
     # Agent gateway (operator-level)
@@ -363,8 +363,10 @@ CONFIG_SCHEMA = {
                     {'value': 'google', 'label': 'Google Gemini'},
                     {'value': 'deepseek', 'label': 'DeepSeek'},
                     {'value': 'grok', 'label': 'xAI Grok'},
+                    {'value': 'atlascloud', 'label': 'AtlasCloud'},
                     {'value': 'custom', 'label': 'Custom API (OpenAI-compatible)'},
                     {'value': 'minimax', 'label': 'MiniMax'},
+                    {'value': 'litellm', 'label': 'LiteLLM (100+ providers)'},
                 ],
                 'description': 'Select your preferred LLM provider'
             },
@@ -497,6 +499,33 @@ CONFIG_SCHEMA = {
                 'description': 'xAI Grok API endpoint',
                 'group': 'grok'
             },
+            # AtlasCloud
+            {
+                'key': 'ATLASCLOUD_API_KEY',
+                'label': 'AtlasCloud API Key',
+                'type': 'password',
+                'required': False,
+                'link': 'https://www.atlascloud.ai/docs/models/llm',
+                'link_text': 'settings.link.getApiKey',
+                'description': 'AtlasCloud API key. Uses the official OpenAI-compatible LLM endpoint.',
+                'group': 'atlascloud'
+            },
+            {
+                'key': 'ATLASCLOUD_MODEL',
+                'label': 'AtlasCloud Model',
+                'type': 'text',
+                'default': 'deepseek-v3',
+                'description': 'Model: deepseek-v3',
+                'group': 'atlascloud'
+            },
+            {
+                'key': 'ATLASCLOUD_BASE_URL',
+                'label': 'AtlasCloud Base URL',
+                'type': 'text',
+                'default': 'https://api.atlascloud.ai/v1',
+                'description': 'AtlasCloud OpenAI-compatible API endpoint. Must include /v1.',
+                'group': 'atlascloud'
+            },
             # Custom API (OpenAI-compatible)
             {
                 'key': 'CUSTOM_API_URL',
@@ -548,6 +577,33 @@ CONFIG_SCHEMA = {
                 'default': 'https://api.minimax.io/v1',
                 'description': 'MiniMax API endpoint',
                 'group': 'minimax'
+            },
+            # LiteLLM
+            {
+                'key': 'LITELLM_API_KEY',
+                'label': 'LiteLLM API Key',
+                'type': 'password',
+                'required': False,
+                'link': 'https://docs.litellm.ai/docs/providers',
+                'link_text': 'settings.link.viewProviders',
+                'description': 'Optional. LiteLLM reads provider-specific env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.) automatically',
+                'group': 'litellm'
+            },
+            {
+                'key': 'LITELLM_MODEL',
+                'label': 'LiteLLM Model',
+                'type': 'text',
+                'default': 'gpt-4o-mini',
+                'description': 'Model ID in provider/model format, e.g. anthropic/claude-sonnet-4-20250514, gemini/gemini-2.5-flash, azure/gpt-4o',
+                'group': 'litellm'
+            },
+            {
+                'key': 'LITELLM_BASE_URL',
+                'label': 'LiteLLM Base URL',
+                'type': 'text',
+                'default': '',
+                'description': 'Optional. Override provider base URL (e.g. Azure endpoint)',
+                'group': 'litellm'
             },
             # Common settings
             {
