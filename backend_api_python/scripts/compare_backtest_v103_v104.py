@@ -93,6 +93,7 @@ def pick_metrics(result: dict) -> dict:
 def main() -> None:
     code_103 = load(find_one("v1.0.3*.py"))
     code_104 = load(find_one("v1.0.4*.py"))
+    code_105 = load(find_one("v1.0.5*.py"))
 
     # Simulate the live snapshot whose trading_config carried 'both': flip the
     # code-declared direction too, in case the engine reads it from @strategy.
@@ -104,6 +105,8 @@ def main() -> None:
         ("v1.0.3 / long (代码声明方向)", code_103, "long"),
         ("v1.0.3 / both (线上误配方向)", code_103_both, "both"),
         ("v1.0.4 / long (四路修复版)", code_104, "long"),
+        # v1.0.5：多空各自独立建模的双向四路版
+        ("v1.0.5 / both (多空独立四路版)", code_105, "both"),
     )
 
     service = BacktestService()

@@ -1,4 +1,4 @@
-my_indicator_name = "v1.0.4 [ETH30m] 趋势回踩突破（四路标准修复版）"
+my_indicator_name = "v1.0.4  [ETH30m多--7.75] 趋势回踩突破（四路标准修复版）"
 my_indicator_description = "v1.0.3 的四路标准重写：EMA判断方向，回踩/突破触发入场，RSI确认动量，ATR过滤极端波动。方向语义锁定为只做多（open_short/close_short 恒为 False），退出由引擎风控负责（固定止损/止盈/移动止盈），指标侧 close_long 仅做趋势/动量/结构破位的结构性离场。"
 
 # signal_form: four_way
