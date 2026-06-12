@@ -88,8 +88,29 @@ def _strategy_live_lock_key(strategy: Dict[str, Any], user_id: int) -> Optional[
         return None
 
 
+def _live_lock_enforced() -> bool:
+    """实盘冲突锁开关，默认开启。
+
+    同一「凭证 + 交易所 + 市场类型 + 交易对」并行多个实盘策略时，交易所侧
+    持仓是同一份：A 策略的移动止损会平掉 B 策略以为还在的仓位，造成本地
+    持仓表与交易所脱同步（参见 OKX 51169 幽灵持仓事故），故上游默认禁止。
+    仅当多个策略共用 demo/测试网账户做实验、且接受持仓互相干扰的风险时，
+    才通过环境变量 LIVE_STRATEGY_LOCK_ENFORCE=false 关闭该检查。
+    """
+    import os
+    val = str(os.getenv("LIVE_STRATEGY_LOCK_ENFORCE", "true")).strip().lower()
+    return val not in ("false", "0", "no", "off")
+
+
 def _find_live_strategy_conflict(strategy: Dict[str, Any], user_id: int) -> Optional[Dict[str, Any]]:
     """Find another running live strategy using the same account + market + symbol."""
+    if not _live_lock_enforced():
+        logger.warning(
+            "Live strategy lock disabled (LIVE_STRATEGY_LOCK_ENFORCE=false); "
+            "skipping conflict check for strategy %s",
+            strategy.get("id"),
+        )
+        return None
     key = _strategy_live_lock_key(strategy, user_id)
     if not key:
         return None
