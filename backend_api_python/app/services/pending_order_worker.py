@@ -1496,6 +1496,27 @@ class PendingOrderWorker:
         parts.append("请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。")
         return "；".join(parts)
 
+    # Exchange responses that definitively mean "there is no position in this
+    # direction to reduce/close". Matching is intentionally loose: the follow-up
+    # action (_sync_positions_best_effort) re-queries the exchange and only
+    # deletes a local row when the exchange is actually flat, so a false
+    # positive here is harmless.
+    _NO_POSITION_TO_CLOSE_PATTERNS = (
+        "51169",                          # OKX: no positions in this direction
+        "don't have any positions",
+        "no positions in this direction",
+        "reduceonly order is rejected",   # Binance futures -2022
+        "'-2022'",
+        "110017",                         # Bybit: position is zero
+        "position_empty",                 # Gate
+        "position is zero",
+        "position does not exist",
+    )
+
+    def _is_no_position_to_close_error(self, error: Any) -> bool:
+        text = str(error or "").lower()
+        return any(p in text for p in self._NO_POSITION_TO_CLOSE_PATTERNS)
+
     def _log_live_order_sizing(
         self,
         *,
@@ -2090,6 +2111,29 @@ class PendingOrderWorker:
                     _console_print(f"[worker] order failed: strategy_id={strategy_id} pending_id={order_id} err={friendly_error}")
                     _notify_live_best_effort(status="failed", error=friendly_error, amount_hint=amount, price_hint=ref_price)
                     append_strategy_log(strategy_id, "error", f"Exchange order failed ({exchange_id} {symbol} {signal_type}): {friendly_error}")
+                    if reduce_only and self._is_no_position_to_close_error(e):
+                        # The exchange says there is nothing to reduce/close in
+                        # this direction (e.g. OKX 51169): the local row in
+                        # qd_strategy_positions is a ghost (closed externally or
+                        # an earlier "failed" order actually filled). Without
+                        # reconciliation, server SL/trailing re-fires every bar
+                        # and both-mode flips stay blocked forever. The sync
+                        # re-queries the exchange and only deletes local rows
+                        # that are truly flat there.
+                        try:
+                            self._sync_positions_best_effort(target_strategy_id=strategy_id)
+                            append_strategy_log(
+                                strategy_id,
+                                "info",
+                                f"Position reconciled after close rejection ({exchange_id} {symbol} {signal_type}): "
+                                "exchange reports no position in this direction; stale local position cleared if present.",
+                            )
+                        except Exception as sync_err:
+                            logger.warning(
+                                "[Reconcile] position sync after no-position close rejection failed: strategy=%s err=%s",
+                                strategy_id,
+                                sync_err,
+                            )
                     return
             except Exception as e:
                 logger.warning(f"live market phase unexpected error: pending_id={order_id}, strategy_id={strategy_id}, cfg={safe_cfg}, err={e}")
