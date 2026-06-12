@@ -735,6 +735,9 @@ class BinanceFuturesClient(BaseRestClient):
 
         # Best-effort MIN_NOTIONAL validation (common reason for "open still fails" with small qty).
         # Use markPrice as an approximation for MARKET order notional.
+        # Binance futures exempts reduce-only orders from the MIN_NOTIONAL filter
+        # (-4164: "... unless you choose reduce only"); closing a residual position
+        # below minNotional must go through, so skip the local pre-check for closes.
         min_notional = Decimal("0")
         mark_price = 0.0
         notional = Decimal("0")
@@ -742,6 +745,8 @@ class BinanceFuturesClient(BaseRestClient):
             fdict = self.get_symbol_filters(symbol=symbol) or {}
             mn = (fdict.get("MIN_NOTIONAL") or {}).get("notional")
             min_notional = self._to_dec(mn or "0")
+            if min_notional > 0 and reduce_only:
+                min_notional = Decimal("0")
             if min_notional > 0:
                 mark_price = float(self.get_mark_price(symbol=symbol) or 0.0)
                 if mark_price > 0:
