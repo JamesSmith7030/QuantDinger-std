@@ -66,6 +66,7 @@ yarn.lock
 # Logs & Runtime Data
 # ========================
 *.log
+!.agents/assets/*.log
 backend_api_python/logs/
 backend_api_python/dist/
 
