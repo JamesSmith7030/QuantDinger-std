@@ -1517,6 +1517,41 @@ class PendingOrderWorker:
         text = str(error or "").lower()
         return any(p in text for p in self._NO_POSITION_TO_CLOSE_PATTERNS)
 
+    def _clear_stale_strategy_position(self, *, strategy_id: int, symbol: str, side: str) -> int:
+        """删除该策略自己的 L3 持仓行（qd_strategy_positions），返回删除行数。
+
+        仅在交易所已确认该方向空仓后调用。上游 v3.0.30 起，
+        _sync_positions_best_effort 只刷新 L1 账户层快照、刻意不触碰策略层
+        （多策略共享账户时不能互相继承仓位），因此"无仓可平"的幽灵行必须
+        在这里显式清除——否则服务端止损/移动止损每根 K 线重复触发，
+        反手开仓也会被一直阻塞。
+        """
+        sym_key = str(symbol or "").split(":")[0].strip()
+        side_norm = str(side or "").strip().lower()
+        if not sym_key or side_norm not in ("long", "short"):
+            return 0
+        deleted = 0
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                "SELECT id, symbol FROM qd_strategy_positions WHERE strategy_id = %s AND side = %s",
+                (int(strategy_id), side_norm),
+            )
+            rows = cur.fetchall() or []
+            # 与 trading_executor._get_current_positions 相同的前缀匹配规则，
+            # 兼容 'ETH/USDT' 与 'ETH/USDT:USDT' 两种存法
+            stale_ids = [
+                int(r.get("id"))
+                for r in rows
+                if str(r.get("symbol") or "").split(":")[0] == sym_key
+            ]
+            for row_id in stale_ids:
+                cur.execute("DELETE FROM qd_strategy_positions WHERE id = %s", (row_id,))
+                deleted += 1
+            db.commit()
+            cur.close()
+        return deleted
+
     def _log_live_order_sizing(
         self,
         *,
@@ -2112,25 +2147,54 @@ class PendingOrderWorker:
                     _notify_live_best_effort(status="failed", error=friendly_error, amount_hint=amount, price_hint=ref_price)
                     append_strategy_log(strategy_id, "error", f"Exchange order failed ({exchange_id} {symbol} {signal_type}): {friendly_error}")
                     if reduce_only and self._is_no_position_to_close_error(e):
-                        # The exchange says there is nothing to reduce/close in
-                        # this direction (e.g. OKX 51169): the local row in
-                        # qd_strategy_positions is a ghost (closed externally or
-                        # an earlier "failed" order actually filled). Without
-                        # reconciliation, server SL/trailing re-fires every bar
-                        # and both-mode flips stay blocked forever. The sync
-                        # re-queries the exchange and only deletes local rows
-                        # that are truly flat there.
+                        # 交易所明确表示该方向无仓可平（OKX 51169 / 币安 -2022 等）：
+                        # 本地策略持仓行是幽灵仓（交易所端已被手动平掉，或更早的
+                        # "失败"订单实际已成交）。注意不能依赖
+                        # _sync_positions_best_effort 来清——v3.0.30 起它只刷新
+                        # L1 账户层快照、不触碰策略层持仓行。这里向交易所再核实
+                        # 一次，确认空仓后直接删除本策略的 L3 幽灵行，终止
+                        # "止损每根 K 线重发 → 永远被拒"的死循环。
                         try:
-                            self._sync_positions_best_effort(target_strategy_id=strategy_id)
-                            append_strategy_log(
-                                strategy_id,
-                                "info",
-                                f"Position reconciled after close rejection ({exchange_id} {symbol} {signal_type}): "
-                                "exchange reports no position in this direction; stale local position cleared if present.",
+                            exch_qty = query_exchange_position_size(
+                                client=client,
+                                symbol=str(symbol or ""),
+                                pos_side=str(pos_side or ""),
+                                market_type=str(market_type or "swap"),
+                                exchange_config=exchange_config,
                             )
+                            if exch_qty <= 0:
+                                removed = self._clear_stale_strategy_position(
+                                    strategy_id=int(strategy_id),
+                                    symbol=str(symbol or ""),
+                                    side=str(pos_side or ""),
+                                )
+                                # 顺带刷新 L1 账户快照，让 UI 的 strategy_only 警告尽快消失
+                                self._sync_positions_best_effort(target_strategy_id=strategy_id)
+                                if removed > 0:
+                                    append_strategy_log(
+                                        strategy_id,
+                                        "info",
+                                        f"Stale strategy position cleared ({exchange_id} {symbol} {pos_side}): "
+                                        f"exchange confirmed flat, removed {removed} local position row(s); "
+                                        "stop-loss/trailing retry loop ends here.",
+                                    )
+                                else:
+                                    append_strategy_log(
+                                        strategy_id,
+                                        "info",
+                                        f"Close rejected as no-position but no local strategy row found "
+                                        f"({exchange_id} {symbol} {pos_side}); nothing to clear.",
+                                    )
+                            else:
+                                append_strategy_log(
+                                    strategy_id,
+                                    "warning",
+                                    f"Close rejected as no-position but exchange still reports qty={exch_qty} "
+                                    f"({exchange_id} {symbol} {pos_side}); local position kept, will retry.",
+                                )
                         except Exception as sync_err:
                             logger.warning(
-                                "[Reconcile] position sync after no-position close rejection failed: strategy=%s err=%s",
+                                "[Reconcile] stale position cleanup after no-position close rejection failed: strategy=%s err=%s",
                                 strategy_id,
                                 sync_err,
                             )
