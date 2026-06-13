@@ -139,6 +139,29 @@ class TradingExecutor:
         # Per-strategy exchange fee-rate cache: {strategy_id: {"maker": float, "taker": float}}
         self._exchange_fee_cache: Dict[int, Optional[Dict[str, float]]] = {}
         self._exchange_fee_cache_lock = threading.Lock()
+
+        # 按 symbol 缓存 minNotional（计价币，如 USDT）。用于识别名义价值低于
+        # 交易所最小可交易名义、因而无法平仓的「灰尘（dust）」残仓。
+        # 键为 (exchange_id, market_type, symbol_prefix) -> (value, expiry_ts)。
+        # TTL 默认 1 小时：交易规则极少变动，每根 K 线都拉取只会徒增限频压力。
+        self._min_notional_cache: Dict[Tuple[str, str, str], Tuple[float, float]] = {}
+        self._min_notional_cache_lock = threading.Lock()
+        self._min_notional_cache_ttl_sec = int(os.getenv("MIN_NOTIONAL_CACHE_TTL_SEC", "3600"))
+
+        # 不可平灰尘残仓的抑制状态。一旦仓位名义价值跌破 minNotional，
+        # 每根 K 线的服务端止损/移动止损都会重发一个必被交易所拒绝的平仓单
+        # （币安 -2022 / OKX dust 场景 51169），从而永久刷错误日志。
+        # 这里对每笔灰尘仓只发一条 actionable 告警（按长间隔或仓位尺寸变化才重发），
+        # 并停止重复发射退出信号，直到仓位发生变化。键为 (strategy_id, symbol_prefix, side)。
+        self._dust_exit_suppress: Dict[Tuple[int, str, str], Dict[str, float]] = {}
+        self._dust_exit_suppress_lock = threading.Lock()
+        self._dust_warn_interval_sec = int(os.getenv("DUST_POSITION_WARN_INTERVAL_SEC", "3600"))
+        # 把灰尘阈值收窄到真实 minNotional 之下的安全余量，避免把临界的正常仓位
+        # 误判为灰尘。默认 0 表示「就用交易所真实 minNotional」。
+        try:
+            self._dust_margin = max(0.0, min(float(os.getenv("DUST_POSITION_MARGIN", "0") or 0.0), 0.5))
+        except (TypeError, ValueError):
+            self._dust_margin = 0.0
         
         # 确保数据库字段存在
         self._ensure_db_columns()
@@ -3313,6 +3336,179 @@ class TradingExecutor:
             
         return None
 
+    @staticmethod
+    def _parse_min_notional_from_filters(fdict: Any) -> float:
+        """从 client 的 ``get_symbol_filters`` 返回中解析最小可交易名义价值（计价币）。
+
+        兼容币安合约/现货的已知结构（``MIN_NOTIONAL`` / ``NOTIONAL``，键为
+        ``notional`` / ``minNotional``）以及扁平结构兜底。
+        无可用值时返回 0.0（调用方将 0 视为「未知」）。
+        """
+        if not isinstance(fdict, dict):
+            return 0.0
+        for key in ("MIN_NOTIONAL", "NOTIONAL"):
+            filt = fdict.get(key)
+            if isinstance(filt, dict):
+                for f in ("notional", "minNotional"):
+                    try:
+                        v = float(filt.get(f) or 0.0)
+                    except (TypeError, ValueError):
+                        v = 0.0
+                    if v > 0:
+                        return v
+        for f in ("minNotional", "min_notional", "notional"):
+            try:
+                v = float(fdict.get(f) or 0.0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if v > 0:
+                return v
+        return 0.0
+
+    def _get_symbol_min_notional(
+        self,
+        exchange_config: Optional[Dict[str, Any]],
+        symbol: str,
+        market_type: str,
+    ) -> float:
+        """尽力获取 ``symbol`` 在所绑定交易所上的 minNotional（计价币），
+        按 (exchange, market_type, symbol) 长 TTL 缓存。
+
+        当未绑定交易所、client 无 filters 接口（如 OKX）或任何查询出错时，
+        返回 0.0（视为「未知」→ fail-open，绝不抑制）。
+        """
+        cfg = exchange_config if isinstance(exchange_config, dict) else {}
+        exchange_id = str(cfg.get("exchange_id") or cfg.get("exchangeId") or cfg.get("exchange") or "").strip().lower()
+        if not exchange_id:
+            return 0.0
+        mt = (market_type or cfg.get("market_type") or "swap").strip().lower()
+        sym_prefix = str(symbol or "").split(":")[0].strip().upper()
+        if not sym_prefix:
+            return 0.0
+        cache_key = (exchange_id, mt, sym_prefix)
+
+        # 先查内存缓存，过期则删除后重新拉取
+        now = time.time()
+        with self._min_notional_cache_lock:
+            item = self._min_notional_cache.get(cache_key)
+            if item:
+                value, expiry = item
+                if now <= expiry:
+                    return value
+                del self._min_notional_cache[cache_key]
+
+        value = 0.0
+        try:
+            from app.services.live_trading.factory import create_client
+
+            client = create_client(cfg, market_type=mt)
+            get_filters = getattr(client, "get_symbol_filters", None)
+            if callable(get_filters):
+                fdict = get_filters(symbol=symbol) or {}
+                value = self._parse_min_notional_from_filters(fdict)
+        except Exception as e:
+            logger.debug(f"min_notional lookup failed for {exchange_id}:{sym_prefix}: {e}")
+            value = 0.0
+
+        # 成功值按完整 TTL 缓存；「未知」(0.0) 只短暂缓存，
+        # 避免一次瞬时错误把灰尘检测停摆整整一小时。
+        ttl = float(self._min_notional_cache_ttl_sec) if value > 0 else 60.0
+        with self._min_notional_cache_lock:
+            self._min_notional_cache[cache_key] = (value, now + ttl)
+        return value
+
+    def _residual_exit_is_dust(
+        self,
+        strategy_id: int,
+        symbol: str,
+        side: str,
+        size: float,
+        current_price: float,
+        market_type: str,
+        trading_config: Optional[Dict[str, Any]],
+    ) -> bool:
+        """当该残仓名义价值低于交易所 minNotional、平仓永远不可能成功时，
+        返回 True，表示应抑制本次服务端退出信号的发射。
+
+        副作用：对每笔灰尘仓只发一条 actionable 告警（按长间隔或仓位尺寸变化才重发），
+        并记录抑制状态，使同一灰尘仓不会每根 K 线重复告警。本方法绝不删除本地 L3
+        持仓行——交易所仍持有真实仓位，此处删除会造出反向的（幽灵仓）bug。
+        """
+        side_norm = (side or "").strip().lower()
+        sym_prefix = str(symbol or "").split(":")[0].strip().upper()
+        key = (int(strategy_id), sym_prefix, side_norm)
+
+        try:
+            size_f = float(size or 0.0)
+            price_f = float(current_price or 0.0)
+        except (TypeError, ValueError):
+            size_f = 0.0
+            price_f = 0.0
+
+        # fail-open 守卫：缺少尺寸/价格/交易所/minNotional 时无法证明是灰尘仓，
+        # 一律放行正常平仓。
+        if size_f <= 0 or price_f <= 0:
+            self._clear_dust_suppress(key)
+            return False
+
+        exchange_config = (trading_config or {}).get("exchange_config")
+        if not isinstance(exchange_config, dict) or not exchange_config:
+            self._clear_dust_suppress(key)
+            return False
+
+        min_notional = self._get_symbol_min_notional(exchange_config, symbol, market_type)
+        if min_notional <= 0:
+            self._clear_dust_suppress(key)
+            return False
+
+        notional = size_f * price_f
+        threshold = min_notional * (1.0 - self._dust_margin)
+        if notional >= threshold:
+            # 正常尺寸仓位：清理可能残留的抑制状态，放行平仓。
+            self._clear_dust_suppress(key)
+            return False
+
+        # 灰尘仓：抑制重发。每笔仓位只告警一次，仅在尺寸变化或长节流间隔到达时才重发。
+        now = time.time()
+        should_warn = False
+        with self._dust_exit_suppress_lock:
+            prev = self._dust_exit_suppress.get(key)
+            size_changed = (
+                prev is None
+                or abs(float(prev.get("size") or 0.0) - size_f) > max(size_f, float(prev.get("size") or 0.0)) * 1e-6
+            )
+            interval_elapsed = prev is None or (now - float(prev.get("warned_at") or 0.0)) >= self._dust_warn_interval_sec
+            if size_changed or interval_elapsed:
+                should_warn = True
+                self._dust_exit_suppress[key] = {"size": size_f, "warned_at": now}
+            elif prev is not None:
+                # 保留 warned_at，仅刷新 size（此处尺寸未变，防御性写法）。
+                prev["size"] = size_f
+
+        if should_warn:
+            msg = (
+                f"Un-closeable dust position detected ({symbol} {side_norm}): "
+                f"size={size_f:.8f} notional≈{notional:.4f} < minNotional={min_notional:.4f}. "
+                "It is below the exchange's minimum tradeable notional and cannot be "
+                "closed by an automated order; manual close/hedge on the exchange is "
+                "required. Suppressing repeated server-side exit attempts until the "
+                "position changes."
+            )
+            try:
+                append_strategy_log(strategy_id, "warning", msg)
+            except Exception:
+                pass
+            logger.warning(f"Strategy {strategy_id} {msg}")
+        return True
+
+    def _clear_dust_suppress(self, key: Tuple[int, str, str]) -> None:
+        """清除灰尘抑制状态，使下一次灰尘事件重新告警。"""
+        try:
+            with self._dust_exit_suppress_lock:
+                self._dust_exit_suppress.pop(key, None)
+        except Exception:
+            pass
+
     def _server_side_stop_loss_signal(
         self,
         strategy_id: int,
@@ -3371,6 +3567,12 @@ class TradingExecutor:
                 if side == 'long':
                     stop_line = entry_price * (1 - sl)
                     if current_price <= stop_line:
+                        if self._residual_exit_is_dust(
+                            strategy_id, pos.get('symbol') or symbol, side,
+                            float(pos.get('size') or 0.0), float(current_price),
+                            market_type, trading_config,
+                        ):
+                            continue
                         return {
                             'type': 'close_long',
                             'trigger_price': float(current_price),
@@ -3383,6 +3585,12 @@ class TradingExecutor:
                 else:
                     stop_line = entry_price * (1 + sl)
                     if current_price >= stop_line:
+                        if self._residual_exit_is_dust(
+                            strategy_id, pos.get('symbol') or symbol, side,
+                            float(pos.get('size') or 0.0), float(current_price),
+                            market_type, trading_config,
+                        ):
+                            continue
                         return {
                             'type': 'close_short',
                             'trigger_price': float(current_price),
@@ -3515,6 +3723,12 @@ class TradingExecutor:
                                 exit_price=float(current_price),
                                 fee_rate=trailing_fee_rate,
                             ):
+                                if self._residual_exit_is_dust(
+                                    strategy_id, pos.get('symbol') or symbol, side,
+                                    float(pos.get('size') or 0.0), float(current_price),
+                                    market_type, trading_config,
+                                ):
+                                    continue
                                 return {
                                     'type': 'close_long',
                                     'trigger_price': float(current_price),
@@ -3537,6 +3751,12 @@ class TradingExecutor:
                                 exit_price=float(current_price),
                                 fee_rate=trailing_fee_rate,
                             ):
+                                if self._residual_exit_is_dust(
+                                    strategy_id, pos.get('symbol') or symbol, side,
+                                    float(pos.get('size') or 0.0), float(current_price),
+                                    market_type, trading_config,
+                                ):
+                                    continue
                                 return {
                                     'type': 'close_short',
                                     'trigger_price': float(current_price),
@@ -3552,6 +3772,12 @@ class TradingExecutor:
                     if side == 'long':
                         tp_line = entry_price * (1 + tp_eff)
                         if current_price >= tp_line:
+                            if self._residual_exit_is_dust(
+                                strategy_id, pos.get('symbol') or symbol, side,
+                                float(pos.get('size') or 0.0), float(current_price),
+                                market_type, trading_config,
+                            ):
+                                continue
                             return {
                                 'type': 'close_long',
                                 'trigger_price': float(current_price),
@@ -3564,6 +3790,12 @@ class TradingExecutor:
                     else:
                         tp_line = entry_price * (1 - tp_eff)
                         if current_price <= tp_line:
+                            if self._residual_exit_is_dust(
+                                strategy_id, pos.get('symbol') or symbol, side,
+                                float(pos.get('size') or 0.0), float(current_price),
+                                market_type, trading_config,
+                            ):
+                                continue
                             return {
                                 'type': 'close_short',
                                 'trigger_price': float(current_price),
