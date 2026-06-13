@@ -1,0 +1,258 @@
+2026/06/13 08:00:19
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 08:00:19
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3310 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 08:00:09
+信号
+Signal submitted: close_short @ 1665.480000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 08:00:09
+信息
+Bar closed ETH/USDT 30m close=1665.110000 pending_signals=0
+2026/06/13 07:30:12
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 07:30:12
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3226 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 07:30:09
+信号
+Signal submitted: close_short @ 1661.310000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 07:30:09
+信息
+Bar closed ETH/USDT 30m close=1661.240000 pending_signals=0
+2026/06/13 07:00:15
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 07:00:15
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3237 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 07:00:09
+信号
+Signal submitted: close_short @ 1661.840000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 07:00:09
+信息
+Bar closed ETH/USDT 30m close=1661.640000 pending_signals=0
+2026/06/13 06:30:12
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 06:30:12
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3286 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 06:30:09
+信号
+Signal submitted: close_short @ 1664.280000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 06:30:09
+信息
+Bar closed ETH/USDT 30m close=1664.400000 pending_signals=0
+2026/06/13 06:00:16
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 06:00:16
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3269 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 06:00:09
+信号
+Signal submitted: close_short @ 1663.430000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 06:00:09
+信息
+Bar closed ETH/USDT 30m close=1663.530000 pending_signals=0
+2026/06/13 05:30:12
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 05:30:12
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3308 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 05:30:09
+信号
+Signal submitted: close_short @ 1665.390000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 05:30:09
+信息
+Bar closed ETH/USDT 30m close=1665.390000 pending_signals=0
+2026/06/13 05:00:15
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 05:00:15
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3281 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 05:00:08
+信号
+Signal submitted: close_short @ 1664.040000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 05:00:08
+信息
+Bar closed ETH/USDT 30m close=1664.330000 pending_signals=0
+2026/06/13 04:30:11
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 04:30:11
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3312 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 04:30:08
+信号
+Signal submitted: close_short @ 1665.620000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 04:30:08
+信息
+Bar closed ETH/USDT 30m close=1665.630000 pending_signals=0
+2026/06/13 04:00:17
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 04:00:17
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3309 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 04:00:08
+信号
+Signal submitted: close_short @ 1665.430000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 04:00:08
+信息
+Bar closed ETH/USDT 30m close=1665.550000 pending_signals=0
+2026/06/13 03:30:10
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 03:30:10
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3374 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 03:30:08
+信号
+Signal submitted: close_short @ 1668.700000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 03:30:08
+信息
+Bar closed ETH/USDT 30m close=1668.890000 pending_signals=0
+2026/06/13 03:00:15
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 03:00:15
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3318 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 03:00:07
+信号
+Signal submitted: close_short @ 1665.880000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 03:00:07
+信息
+Bar closed ETH/USDT 30m close=1666.130000 pending_signals=0
+2026/06/13 02:30:10
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 02:30:10
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3324 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 02:30:07
+信号
+Signal submitted: close_short @ 1666.200000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 02:30:07
+信息
+Bar closed ETH/USDT 30m close=1666.260000 pending_signals=0
+2026/06/13 02:00:13
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 02:00:13
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3360 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 02:00:07
+信号
+Signal submitted: close_short @ 1668.020000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 02:00:07
+信息
+Bar closed ETH/USDT 30m close=1668.210000 pending_signals=0
+2026/06/13 01:30:09
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 01:30:09
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3393 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 01:30:06
+信号
+Signal submitted: close_short @ 1669.670000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 01:30:06
+信息
+Bar closed ETH/USDT 30m close=1670.140000 pending_signals=0
+2026/06/13 01:05:09
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 01:05:09
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3488 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 01:05:06
+信号
+Signal submitted: close_short @ 1674.420000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 01:05:05
+信息
+Live loop ready ETH/USDT 30m, pending signals: 0
+2026/06/13 01:04:54
+信息
+Strategy execution thread started
+2026/06/13 01:04:49
+信息
+Strategy execution thread started
+2026/06/13 01:00:11
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 01:00:11
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3440 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 01:00:09
+信号
+Signal submitted: close_short @ 1671.990000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 01:00:08
+信息
+Bar closed ETH/USDT 30m close=1672.120000 pending_signals=0
+2026/06/13 00:30:10
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 00:30:10
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3394 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 00:30:08
+信号
+Signal submitted: close_short @ 1669.710000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 00:30:08
+信息
+Bar closed ETH/USDT 30m close=1669.520000 pending_signals=0
+2026/06/13 00:00:18
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 00:00:18
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3174 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 00:00:08
+信号
+Signal submitted: close_short @ 1658.690000, reason=server_stop_loss, sl=1650.114760
+2026/06/13 00:00:08
+信息
+Bar closed ETH/USDT 30m close=1658.760000 pending_signals=0
+2026/06/12 23:30:10
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 23:30:10
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3640 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 23:30:07
+信号
+Signal submitted: close_short @ 1682.010000, reason=server_stop_loss, sl=1650.114760
+2026/06/12 23:30:07
+信息
+Bar closed ETH/USDT 30m close=1681.030000 pending_signals=0
+2026/06/12 23:00:39
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 23:00:39
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3725 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 23:00:37
+错误
+Signal rejected or not executed: open_long
+2026/06/12 23:00:37
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/12 23:00:10
+信息
+Position reconciled after close rejection (binance ETH/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 23:00:10
+错误
+Exchange order failed (binance ETH/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=ETHUSDT side=BUY qty_req=0.002 qty_norm=0.002 base_url=https://testnet.binancefuture.com filtersSymbol=ETHUSDT contractType=PERPETUAL stepSize=0.001 quantityPrecision=3 minNotional=20 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 3.3701 USDT；按当前价估算至少约 20.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=3.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 23:00:07
+信号
+Signal submitted: close_short @ 1685.050000, reason=server_stop_loss, sl=1650.114760
+2026/06/12 23:00:07
+信息
+Bar closed ETH/USDT 30m close=1685.130000 pending_signals=1

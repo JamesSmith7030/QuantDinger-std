@@ -1,0 +1,600 @@
+2026/06/12 11:00:08
+信息
+Bar closed ETH/USDT 30m close=1675.040000 pending_signals=0
+2026/06/12 10:30:08
+信息
+Bar closed ETH/USDT 30m close=1672.200000 pending_signals=0
+2026/06/12 10:10:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258724mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781230210358'}], 'inTime': '1781230210329740', 'msg': 'All operations failed', 'outTime': '1781230210384217'}
+2026/06/12 10:10:08
+错误
+Signal rejected or not executed: open_long
+2026/06/12 10:10:08
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/12 10:00:08
+信息
+Bar closed ETH/USDT 30m close=1666.400000 pending_signals=0
+2026/06/12 09:30:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258718mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781227810074'}], 'inTime': '1781227810045824', 'msg': 'All operations failed', 'outTime': '1781227810100505'}
+2026/06/12 09:30:08
+信号
+Signal submitted: close_short @ 1662.130000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 09:30:08
+信息
+Bar closed ETH/USDT 30m close=1662.130000 pending_signals=0
+2026/06/12 09:27:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258716mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781227629494'}], 'inTime': '1781227629465755', 'msg': 'All operations failed', 'outTime': '1781227629521334'}
+2026/06/12 09:27:07
+信号
+Signal submitted: close_short @ 1662.640000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 09:00:07
+信息
+Bar closed ETH/USDT 30m close=1671.500000 pending_signals=0
+2026/06/12 08:30:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258708mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781224209642'}], 'inTime': '1781224209614058', 'msg': 'All operations failed', 'outTime': '1781224209668532'}
+2026/06/12 08:30:07
+错误
+Signal rejected or not executed: open_long
+2026/06/12 08:30:07
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/12 08:30:07
+信息
+Bar closed ETH/USDT 30m close=1671.600000 pending_signals=1
+2026/06/12 08:00:07
+信息
+Bar closed ETH/USDT 30m close=1672.670000 pending_signals=0
+2026/06/12 07:41:01
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258699mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781221259903'}], 'inTime': '1781221259874432', 'msg': 'All operations failed', 'outTime': '1781221259928617'}
+2026/06/12 07:40:57
+错误
+Signal rejected or not executed: open_long
+2026/06/12 07:40:57
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/12 07:30:07
+信息
+Bar closed ETH/USDT 30m close=1669.540000 pending_signals=0
+2026/06/12 07:00:07
+信息
+Bar closed ETH/USDT 30m close=1673.740000 pending_signals=0
+2026/06/12 06:30:07
+信息
+Bar closed ETH/USDT 30m close=1676.790000 pending_signals=0
+2026/06/12 06:00:07
+信息
+Bar closed ETH/USDT 30m close=1676.040000 pending_signals=0
+2026/06/12 05:30:06
+信息
+Bar closed ETH/USDT 30m close=1678.240000 pending_signals=0
+2026/06/12 05:00:06
+信息
+Bar closed ETH/USDT 30m close=1671.670000 pending_signals=0
+2026/06/12 04:30:06
+信息
+Bar closed ETH/USDT 30m close=1669.680000 pending_signals=0
+2026/06/12 04:00:06
+信息
+Bar closed ETH/USDT 30m close=1681.350000 pending_signals=0
+2026/06/12 03:30:06
+信息
+Bar closed ETH/USDT 30m close=1679.830000 pending_signals=0
+2026/06/12 03:00:06
+信息
+Bar closed ETH/USDT 30m close=1682.100000 pending_signals=0
+2026/06/12 02:30:06
+信息
+Bar closed ETH/USDT 30m close=1679.860000 pending_signals=0
+2026/06/12 02:00:05
+信息
+Bar closed ETH/USDT 30m close=1688.030000 pending_signals=1
+2026/06/12 01:30:18
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258657mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781199017611'}], 'inTime': '1781199017582360', 'msg': 'All operations failed', 'outTime': '1781199017637847'}
+2026/06/12 01:30:15
+错误
+Signal rejected or not executed: open_long
+2026/06/12 01:30:15
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/12 01:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258655mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781199007265'}], 'inTime': '1781199007236110', 'msg': 'All operations failed', 'outTime': '1781199007290760'}
+2026/06/12 01:30:05
+信号
+Signal submitted: close_short @ 1654.380000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 01:30:05
+信息
+Bar closed ETH/USDT 30m close=1654.630000 pending_signals=0
+2026/06/12 01:00:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258652mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781197210272'}], 'inTime': '1781197210243271', 'msg': 'All operations failed', 'outTime': '1781197210297659'}
+2026/06/12 01:00:05
+信号
+Signal submitted: close_short @ 1638.880000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 01:00:05
+信息
+Bar closed ETH/USDT 30m close=1638.560000 pending_signals=0
+2026/06/12 00:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX HTTP 500: {"code":"50013","data":[],"msg":"Systems are busy. Please try again later."}
+2026/06/12 00:30:05
+信号
+Signal submitted: close_short @ 1640.870000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 00:30:05
+信息
+Bar closed ETH/USDT 30m close=1640.000000 pending_signals=0
+2026/06/12 00:00:14
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX HTTP 500: {"code":"50013","data":[],"msg":"Systems are busy. Please try again later."}
+2026/06/12 00:00:05
+信号
+Signal submitted: close_short @ 1644.720000, reason=server_trailing_stop, trail=1612.009950
+2026/06/12 00:00:05
+信息
+Bar closed ETH/USDT 30m close=1645.000000 pending_signals=0
+2026/06/11 23:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258641mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781191807088'}], 'inTime': '1781191807062159', 'msg': 'All operations failed', 'outTime': '1781191807114437'}
+2026/06/11 23:30:05
+信号
+Signal submitted: close_short @ 1645.360000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 23:30:05
+信息
+Bar closed ETH/USDT 30m close=1645.190000 pending_signals=0
+2026/06/11 23:00:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258637mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781190009569'}], 'inTime': '1781190009543233', 'msg': 'All operations failed', 'outTime': '1781190009598693'}
+2026/06/11 23:00:05
+信号
+Signal submitted: close_short @ 1642.240000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 23:00:05
+信息
+Bar closed ETH/USDT 30m close=1641.910000 pending_signals=0
+2026/06/11 22:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258634mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781188206963'}], 'inTime': '1781188206936369', 'msg': 'All operations failed', 'outTime': '1781188206988644'}
+2026/06/11 22:30:04
+信号
+Signal submitted: close_short @ 1648.830000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 22:30:04
+信息
+Bar closed ETH/USDT 30m close=1648.490000 pending_signals=0
+2026/06/11 22:00:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258628mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781186409649'}], 'inTime': '1781186409623194', 'msg': 'All operations failed', 'outTime': '1781186409678745'}
+2026/06/11 22:00:04
+信号
+Signal submitted: close_short @ 1652.640000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 22:00:04
+信息
+Bar closed ETH/USDT 30m close=1652.050000 pending_signals=0
+2026/06/11 21:50:28
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258624mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781185827056'}], 'inTime': '1781185827030145', 'msg': 'All operations failed', 'outTime': '1781185827085445'}
+2026/06/11 21:50:24
+错误
+Signal rejected or not executed: open_long
+2026/06/11 21:50:24
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/11 21:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258622mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781184606962'}], 'inTime': '1781184606935760', 'msg': 'All operations failed', 'outTime': '1781184606988602'}
+2026/06/11 21:30:04
+信号
+Signal submitted: close_short @ 1647.840000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 21:30:04
+信息
+Bar closed ETH/USDT 30m close=1647.200000 pending_signals=0
+2026/06/11 21:00:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258618mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781182809286'}], 'inTime': '1781182809259989', 'msg': 'All operations failed', 'outTime': '1781182809315295'}
+2026/06/11 21:00:04
+信号
+Signal submitted: close_short @ 1650.760000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 21:00:04
+信息
+Bar closed ETH/USDT 30m close=1650.270000 pending_signals=0
+2026/06/11 20:30:07
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258614mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781181006477'}], 'inTime': '1781181006450607', 'msg': 'All operations failed', 'outTime': '1781181006505934'}
+2026/06/11 20:30:04
+信号
+Signal submitted: close_short @ 1647.620000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 20:30:04
+信息
+Bar closed ETH/USDT 30m close=1649.200000 pending_signals=0
+2026/06/11 20:00:47
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258612mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781179245949'}], 'inTime': '1781179245922854', 'msg': 'All operations failed', 'outTime': '1781179245978245'}
+2026/06/11 20:00:43
+信号
+Signal submitted: close_short @ 1663.360000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 20:00:04
+信息
+Bar closed ETH/USDT 30m close=1665.820000 pending_signals=1
+2026/06/11 19:30:46
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258602mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781177445647'}], 'inTime': '1781177445620532', 'msg': 'All operations failed', 'outTime': '1781177445675945'}
+2026/06/11 19:30:43
+错误
+Signal rejected or not executed: open_long
+2026/06/11 19:30:43
+信息
+Flip open_long skipped: close_short did not clear short for ETH/USDT
+2026/06/11 19:30:06
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258600mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781177405813'}], 'inTime': '1781177405786876', 'msg': 'All operations failed', 'outTime': '1781177405842012'}
+2026/06/11 19:30:03
+信号
+Signal submitted: close_short @ 1662.400000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 19:30:03
+信息
+Bar closed ETH/USDT 30m close=1662.390000 pending_signals=0
+2026/06/11 19:00:09
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258596mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781175608867'}], 'inTime': '1781175608841046', 'msg': 'All operations failed', 'outTime': '1781175608893215'}
+2026/06/11 19:00:03
+信号
+Signal submitted: close_short @ 1657.880000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 19:00:03
+信息
+Bar closed ETH/USDT 30m close=1657.730000 pending_signals=0
+2026/06/11 18:30:06
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258592mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781173805312'}], 'inTime': '1781173805285270', 'msg': 'All operations failed', 'outTime': '1781173805340636'}
+2026/06/11 18:30:03
+信号
+Signal submitted: close_short @ 1655.510000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 18:30:03
+信息
+Bar closed ETH/USDT 30m close=1655.590000 pending_signals=0
+2026/06/11 18:00:07
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258587mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781172006496'}], 'inTime': '1781172006469270', 'msg': 'All operations failed', 'outTime': '1781172006524675'}
+2026/06/11 18:00:03
+信号
+Signal submitted: close_short @ 1657.900000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 18:00:03
+信息
+Bar closed ETH/USDT 30m close=1657.850000 pending_signals=0
+2026/06/11 17:30:05
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258584mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781170204690'}], 'inTime': '1781170204663880', 'msg': 'All operations failed', 'outTime': '1781170204719018'}
+2026/06/11 17:30:03
+信号
+Signal submitted: close_short @ 1656.190000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 17:30:03
+信息
+Bar closed ETH/USDT 30m close=1656.200000 pending_signals=0
+2026/06/11 17:00:13
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258579mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781168411980'}], 'inTime': '1781168411953337', 'msg': 'All operations failed', 'outTime': '1781168412008714'}
+2026/06/11 17:00:02
+信号
+Signal submitted: close_short @ 1658.920000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 17:00:02
+信息
+Bar closed ETH/USDT 30m close=1658.880000 pending_signals=1
+2026/06/11 16:30:06
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258576mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781166605163'}], 'inTime': '1781166605136699', 'msg': 'All operations failed', 'outTime': '1781166605192156'}
+2026/06/11 16:30:02
+信号
+Signal submitted: close_short @ 1659.990000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 16:30:02
+信息
+Bar closed ETH/USDT 30m close=1660.290000 pending_signals=2
+2026/06/11 16:00:07
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258569mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781164806024'}], 'inTime': '1781164805998335', 'msg': 'All operations failed', 'outTime': '1781164806050322'}
+2026/06/11 16:00:02
+信号
+Signal submitted: close_short @ 1653.490000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 16:00:02
+信息
+Bar closed ETH/USDT 30m close=1653.620000 pending_signals=2
+2026/06/11 15:30:06
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258566mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781163005082'}], 'inTime': '1781163005055955', 'msg': 'All operations failed', 'outTime': '1781163005111335'}
+2026/06/11 15:30:02
+信号
+Signal submitted: close_short @ 1656.130000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 15:30:02
+信息
+Bar closed ETH/USDT 30m close=1656.140000 pending_signals=2
+2026/06/11 15:00:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258562mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781161206917'}], 'inTime': '1781161206885874', 'msg': 'All operations failed', 'outTime': '1781161206945827'}
+2026/06/11 15:00:02
+信号
+Signal submitted: close_short @ 1653.910000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 15:00:02
+信息
+Bar closed ETH/USDT 30m close=1653.760000 pending_signals=2
+2026/06/11 14:30:12
+信息
+Bar closed ETH/USDT 30m close=1658.110000 pending_signals=2
+2026/06/11 14:30:04
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258558mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781159403574'}], 'inTime': '1781159403547831', 'msg': 'All operations failed', 'outTime': '1781159403600133'}
+2026/06/11 14:30:01
+信号
+Signal submitted: close_short @ 1658.100000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 14:00:11
+信息
+Bar closed ETH/USDT 30m close=1646.960000 pending_signals=2
+2026/06/11 14:00:05
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258553mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781157604572'}], 'inTime': '1781157604545478', 'msg': 'All operations failed', 'outTime': '1781157604598064'}
+2026/06/11 14:00:01
+信号
+Signal submitted: close_short @ 1647.140000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 13:30:11
+信息
+Bar closed ETH/USDT 30m close=1648.530000 pending_signals=2
+2026/06/11 13:30:04
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258550mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781155802988'}], 'inTime': '1781155802962176', 'msg': 'All operations failed', 'outTime': '1781155803014723'}
+2026/06/11 13:30:01
+信号
+Signal submitted: close_short @ 1648.560000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 13:00:10
+信息
+Bar closed ETH/USDT 30m close=1655.320000 pending_signals=2
+2026/06/11 13:00:03
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258544mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781154002187'}], 'inTime': '1781154002160737', 'msg': 'All operations failed', 'outTime': '1781154002212668'}
+2026/06/11 13:00:00
+信号
+Signal submitted: close_short @ 1655.910000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 12:30:10
+信息
+Bar closed ETH/USDT 30m close=1650.480000 pending_signals=2
+2026/06/11 12:30:08
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258542mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781152207584'}], 'inTime': '1781152207557762', 'msg': 'All operations failed', 'outTime': '1781152207613083'}
+2026/06/11 12:30:00
+信号
+Signal submitted: close_short @ 1650.220000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 12:00:10
+信息
+Bar closed ETH/USDT 30m close=1653.240000 pending_signals=2
+2026/06/11 12:00:03
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258533mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781150402101'}], 'inTime': '1781150401893604', 'msg': 'All operations failed', 'outTime': '1781150402127364'}
+2026/06/11 12:00:00
+信号
+Signal submitted: close_short @ 1653.170000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 11:30:10
+信息
+Bar closed ETH/USDT 30m close=1638.910000 pending_signals=2
+2026/06/11 11:30:03
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258531mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781148602440'}], 'inTime': '1781148602413313', 'msg': 'All operations failed', 'outTime': '1781148602469459'}
+2026/06/11 11:30:00
+信号
+Signal submitted: close_short @ 1638.790000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 11:00:14
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258530mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781146813905'}], 'inTime': '1781146813879229', 'msg': 'All operations failed', 'outTime': '1781146813930722'}
+2026/06/11 11:00:10
+信号
+Signal submitted: close_short @ 1639.980000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 11:00:10
+信息
+Bar closed ETH/USDT 30m close=1639.860000 pending_signals=2
+2026/06/11 10:30:12
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258525mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781145011752'}], 'inTime': '1781145011726510', 'msg': 'All operations failed', 'outTime': '1781145011778032'}
+2026/06/11 10:30:09
+信号
+Signal submitted: close_short @ 1634.810000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 10:30:09
+信息
+Bar closed ETH/USDT 30m close=1634.810000 pending_signals=2
+2026/06/11 10:00:14
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258524mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781143213404'}], 'inTime': '1781143213375851', 'msg': 'All operations failed', 'outTime': '1781143213433636'}
+2026/06/11 10:00:09
+信号
+Signal submitted: close_short @ 1642.780000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 10:00:09
+信息
+Bar closed ETH/USDT 30m close=1642.120000 pending_signals=2
+2026/06/11 09:30:12
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258518mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781141411576'}], 'inTime': '1781141411550810', 'msg': 'All operations failed', 'outTime': '1781141411602598'}
+2026/06/11 09:30:09
+信号
+Signal submitted: close_short @ 1640.720000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 09:30:09
+信息
+Bar closed ETH/USDT 30m close=1640.690000 pending_signals=2
+2026/06/11 09:00:14
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258515mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781139612935'}], 'inTime': '1781139612907180', 'msg': 'All operations failed', 'outTime': '1781139612964916'}
+2026/06/11 09:00:09
+信号
+Signal submitted: close_short @ 1627.920000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 09:00:09
+信息
+Bar closed ETH/USDT 30m close=1628.050000 pending_signals=2
+2026/06/11 08:30:12
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258511mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781137810961'}], 'inTime': '1781137810935056', 'msg': 'All operations failed', 'outTime': '1781137810986742'}
+2026/06/11 08:30:09
+信号
+Signal submitted: close_short @ 1630.210000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 08:30:09
+信息
+Bar closed ETH/USDT 30m close=1630.350000 pending_signals=2
+2026/06/11 08:00:19
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258508mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781136017695'}], 'inTime': '1781136017667064', 'msg': 'All operations failed', 'outTime': '1781136017724820'}
+2026/06/11 08:00:09
+信号
+Signal submitted: close_short @ 1621.060000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 08:00:09
+信息
+Bar closed ETH/USDT 30m close=1621.060000 pending_signals=2
+2026/06/11 07:30:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258503mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781134210502'}], 'inTime': '1781134210473921', 'msg': 'All operations failed', 'outTime': '1781134210532031'}
+2026/06/11 07:30:09
+信号
+Signal submitted: close_short @ 1620.950000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 07:30:09
+信息
+Bar closed ETH/USDT 30m close=1620.870000 pending_signals=2
+2026/06/11 07:00:13
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258502mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781132412544'}], 'inTime': '1781132412518895', 'msg': 'All operations failed', 'outTime': '1781132412570942'}
+2026/06/11 07:00:08
+信号
+Signal submitted: close_short @ 1615.570000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 07:00:08
+信息
+Bar closed ETH/USDT 30m close=1612.630000 pending_signals=2
+2026/06/11 06:30:41
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258498mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781130640482'}], 'inTime': '1781130640453784', 'msg': 'All operations failed', 'outTime': '1781130640511498'}
+2026/06/11 06:30:38
+信号
+Signal submitted: close_short @ 1612.180000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 06:30:08
+信息
+Bar closed ETH/USDT 30m close=1609.360000 pending_signals=2
+2026/06/11 06:28:41
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258497mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781130520192'}], 'inTime': '1781130520166403', 'msg': 'All operations failed', 'outTime': '1781130520217976'}
+2026/06/11 06:28:38
+信号
+Signal submitted: close_short @ 1612.800000, reason=server_trailing_stop, trail=1612.009950
+2026/06/11 06:00:08
+信息
+Bar closed ETH/USDT 30m close=1610.370000 pending_signals=2
+2026/06/11 05:30:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258490mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781127010176'}], 'inTime': '1781127010147609', 'msg': 'All operations failed', 'outTime': '1781127010205590'}
+2026/06/11 05:30:08
+信号
+Signal submitted: close_short @ 1618.270000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 05:30:08
+信息
+Bar closed ETH/USDT 30m close=1618.500000 pending_signals=2
+2026/06/11 05:00:13
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258486mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781125212240'}], 'inTime': '1781125212214296', 'msg': 'All operations failed', 'outTime': '1781125212265835'}
+2026/06/11 05:00:08
+信号
+Signal submitted: close_short @ 1629.560000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 05:00:08
+信息
+Bar closed ETH/USDT 30m close=1629.030000 pending_signals=2
+2026/06/11 04:30:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258483mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781123409807'}], 'inTime': '1781123409778702', 'msg': 'All operations failed', 'outTime': '1781123409836706'}
+2026/06/11 04:30:07
+信号
+Signal submitted: close_short @ 1631.990000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 04:30:07
+信息
+Bar closed ETH/USDT 30m close=1631.170000 pending_signals=2
+2026/06/11 04:00:15
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258480mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781121614636'}], 'inTime': '1781121614607787', 'msg': 'All operations failed', 'outTime': '1781121614665425'}
+2026/06/11 04:00:07
+信号
+Signal submitted: close_short @ 1629.180000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 04:00:07
+信息
+Bar closed ETH/USDT 30m close=1629.470000 pending_signals=2
+2026/06/11 03:30:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258475mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781119809477'}], 'inTime': '1781119809451663', 'msg': 'All operations failed', 'outTime': '1781119809503331'}
+2026/06/11 03:30:07
+信号
+Signal submitted: close_short @ 1626.800000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 03:30:07
+信息
+Bar closed ETH/USDT 30m close=1626.930000 pending_signals=2
+2026/06/11 03:00:12
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258472mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781118011176'}], 'inTime': '1781118011150519', 'msg': 'All operations failed', 'outTime': '1781118011202231'}
+2026/06/11 03:00:07
+信号
+Signal submitted: close_short @ 1629.840000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 03:00:07
+信息
+Bar closed ETH/USDT 30m close=1630.250000 pending_signals=2
+2026/06/11 02:30:10
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258469mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781116209476'}], 'inTime': '1781116209447375', 'msg': 'All operations failed', 'outTime': '1781116209505323'}
+2026/06/11 02:30:07
+信号
+Signal submitted: close_short @ 1636.070000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 02:30:07
+信息
+Bar closed ETH/USDT 30m close=1634.730000 pending_signals=2
+2026/06/11 02:00:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258466mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781114410796'}], 'inTime': '1781114410768095', 'msg': 'All operations failed', 'outTime': '1781114410825732'}
+2026/06/11 02:00:07
+信号
+Signal submitted: close_short @ 1631.550000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 02:00:07
+信息
+Bar closed ETH/USDT 30m close=1632.540000 pending_signals=2
+2026/06/11 01:30:09
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258463mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781112608535'}], 'inTime': '1781112608509857', 'msg': 'All operations failed', 'outTime': '1781112608561436'}
+2026/06/11 01:30:07
+信号
+Signal submitted: close_short @ 1627.410000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 01:30:07
+信息
+Bar closed ETH/USDT 30m close=1627.840000 pending_signals=2
+2026/06/11 01:00:11
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258460mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781110810108'}], 'inTime': '1781110810080199', 'msg': 'All operations failed', 'outTime': '1781110810138010'}
+2026/06/11 01:00:06
+信号
+Signal submitted: close_short @ 1641.180000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 01:00:06
+信息
+Bar closed ETH/USDT 30m close=1641.560000 pending_signals=2
+2026/06/11 00:30:09
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258455mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781109008595'}], 'inTime': '1781109008569685', 'msg': 'All operations failed', 'outTime': '1781109008621209'}
+2026/06/11 00:30:06
+信号
+Signal submitted: close_short @ 1648.000000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 00:30:06
+信息
+Bar closed ETH/USDT 30m close=1648.210000 pending_signals=2
+2026/06/11 00:00:14
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258450mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781107213501'}], 'inTime': '1781107213473093', 'msg': 'All operations failed', 'outTime': '1781107213530721'}
+2026/06/11 00:00:06
+信号
+Signal submitted: close_short @ 1657.110000, reason=server_trailing_stop, trail=1615.638000
+2026/06/11 00:00:06
+信息
+Bar closed ETH/USDT 30m close=1656.640000 pending_signals=2
+2026/06/10 23:30:09
+错误
+Exchange order failed (okx ETH/USDT close_short): OKX error: {'code': '1', 'data': [{'clOrdId': 'qd258444mkt', 'ordId': '', 'sCode': '51169', 'sMsg': "Order failed because you don't have any positions in this direction for this contract to reduce or close. ", 'subCode': '', 'tag': '56fa80b0ce8cBCDE', 'ts': '1781105408152'}], 'inTime': '1781105408126874', 'msg': 'All operations failed', 'outTime': '1781105408178732'}
+2026/06/10 23:30:06
+信号
+Signal submitted: close_short @ 1648.010000, reason=server_trailing_stop, trail=1615.638000
+2026/06/10 23:30:06
+信息
+Bar closed ETH/USDT 30m close=1648.860000 pending_signals=2
