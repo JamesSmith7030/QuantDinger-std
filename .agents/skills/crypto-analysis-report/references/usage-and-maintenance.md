@@ -103,7 +103,18 @@
 - [ ] 免责声明、时间戳、现价均正确填充。
 - [ ] 抽查 1 个评分：手动按权重算一遍综合分，与报告一致。
 
-### 4.5 依赖与环境
+### 4.5 算法来源（对齐后端引擎，便于维护时同步）
+报告的「开仓指南/支撑阻力/波动性」口径**对齐 QuantDinger 后端**
+`backend_api_python/app/services/market_data_collector.py::MarketDataCollector._calculate_indicators`
+（专业报告 `/api/fast-analysis/analyze` 同款）：
+- **支撑/阻力 = 三方法平均**：`(枢轴S1/R1 + 20日摆动高低 + 布林轨)/3`（method=`pivot_swing_bb_avg`）。
+- **止损/止盈 = ATR×结构融合**（method=`atr_support_resistance`）：
+  止损=`max(现价−2×ATR, 支撑×0.99)`；止盈=`min(现价+3×ATR, 阻力×1.01)`；RR 以现价为基准。
+- **波动性阈值**：≤2% 低 / 2–5% 中 / >5% 高。
+> ⚠️ 取其精华去其糟粕：后端的基本面/情绪面/地缘评分依赖 GPT-5.5 + 新闻源 + 积分系统，本技能
+> 不复制（无数据源会编造），相关维度一律如实标注「数据缺失」。后端若改算法，按此处同步更新本技能。
+
+### 4.6 依赖与环境
 - `okx` CLI：`npm install -g @okx_ai/okx-trade-cli`（行情免鉴权免代理）。
 - 评分框架参考全局技能 `kline-indicator`（`~/.claude/skills/kline-indicator/references/three-pillars.md`）。
 - 相关文档：[.agents/docs/交易所技能清单与测试提示词.md](../../../docs/交易所技能清单与测试提示词.md)（OKX/Binance 技能与代理坑）。
