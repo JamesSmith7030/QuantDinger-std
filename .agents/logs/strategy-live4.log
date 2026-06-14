@@ -1,0 +1,600 @@
+2026/06/13 16:00:07
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 16:00:06
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6847 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 16:00:04
+信号
+Signal submitted: close_short @ 1.141200, reason=server_trailing_stop, trail=1.053497
+2026/06/13 16:00:04
+信息
+Bar closed XRP/USDT 1H close=1.140900 pending_signals=0
+2026/06/13 15:00:07
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 15:00:07
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6822 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 15:00:04
+信号
+Signal submitted: close_short @ 1.137000, reason=server_trailing_stop, trail=1.053497
+2026/06/13 15:00:04
+信息
+Bar closed XRP/USDT 1H close=1.136800 pending_signals=0
+2026/06/13 14:00:06
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 14:00:06
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6790 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 14:00:04
+信号
+Signal submitted: close_short @ 1.131600, reason=server_trailing_stop, trail=1.053497
+2026/06/13 14:00:04
+信息
+Bar closed XRP/USDT 1H close=1.132000 pending_signals=0
+2026/06/13 13:00:06
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 13:00:06
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6797 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 13:00:03
+信号
+Signal submitted: close_short @ 1.132800, reason=server_trailing_stop, trail=1.053497
+2026/06/13 13:00:03
+信息
+Bar closed XRP/USDT 1H close=1.132600 pending_signals=0
+2026/06/13 12:00:06
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 12:00:06
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6798 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 12:00:03
+信号
+Signal submitted: close_short @ 1.133000, reason=server_trailing_stop, trail=1.053497
+2026/06/13 11:00:05
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 11:00:05
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6804 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 11:00:03
+信号
+Signal submitted: close_short @ 1.134000, reason=server_trailing_stop, trail=1.053497
+2026/06/13 11:00:03
+信息
+Bar closed XRP/USDT 1H close=1.134000 pending_signals=0
+2026/06/13 10:00:06
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 10:00:06
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6835 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 10:00:03
+信号
+Signal submitted: close_short @ 1.139100, reason=server_trailing_stop, trail=1.053497
+2026/06/13 10:00:03
+信息
+Bar closed XRP/USDT 1H close=1.139100 pending_signals=0
+2026/06/13 09:00:05
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 09:00:05
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6803 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 09:00:03
+信号
+Signal submitted: close_short @ 1.133800, reason=server_trailing_stop, trail=1.053497
+2026/06/13 09:00:03
+信息
+Bar closed XRP/USDT 1H close=1.133800 pending_signals=0
+2026/06/13 08:55:27
+warning
+Close rejected as no-position but exchange still reports qty=0.6 (binance XRP/USDT short); local position kept, will retry.
+2026/06/13 08:55:27
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6805 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 08:55:25
+信号
+Signal submitted: close_short @ 1.134200, reason=server_trailing_stop, trail=1.053497
+2026/06/13 08:55:21
+信息
+Live loop ready XRP/USDT 1H, pending signals: 0
+2026/06/13 08:55:16
+信息
+Strategy execution thread started
+2026/06/13 08:00:12
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 08:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6790 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 08:00:08
+信号
+Signal submitted: close_short @ 1.131700, reason=server_trailing_stop, trail=1.053497
+2026/06/13 08:00:08
+信息
+Bar closed XRP/USDT 1H close=1.131800 pending_signals=0
+2026/06/13 07:00:11
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 07:00:11
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6782 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 07:00:08
+信号
+Signal submitted: close_short @ 1.130400, reason=server_trailing_stop, trail=1.053497
+2026/06/13 07:00:08
+信息
+Bar closed XRP/USDT 1H close=1.130100 pending_signals=0
+2026/06/13 06:00:10
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 06:00:10
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6781 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 06:00:08
+信号
+Signal submitted: close_short @ 1.130200, reason=server_trailing_stop, trail=1.053497
+2026/06/13 06:00:08
+信息
+Bar closed XRP/USDT 1H close=1.129200 pending_signals=0
+2026/06/13 05:00:10
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 05:00:10
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6794 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 05:00:08
+信号
+Signal submitted: close_short @ 1.132400, reason=server_trailing_stop, trail=1.053497
+2026/06/13 05:00:08
+信息
+Bar closed XRP/USDT 1H close=1.132400 pending_signals=0
+2026/06/13 04:00:10
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 04:00:10
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6786 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 04:00:07
+信号
+Signal submitted: close_short @ 1.131000, reason=server_trailing_stop, trail=1.053497
+2026/06/13 04:00:07
+信息
+Bar closed XRP/USDT 1H close=1.131300 pending_signals=0
+2026/06/13 03:00:09
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 03:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6779 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 03:00:07
+信号
+Signal submitted: close_short @ 1.129800, reason=server_trailing_stop, trail=1.053497
+2026/06/13 03:00:06
+信息
+Bar closed XRP/USDT 1H close=1.129700 pending_signals=0
+2026/06/13 02:00:09
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 02:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6789 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 02:00:06
+信号
+Signal submitted: close_short @ 1.131500, reason=server_trailing_stop, trail=1.053497
+2026/06/13 02:00:06
+信息
+Bar closed XRP/USDT 1H close=1.132200 pending_signals=0
+2026/06/13 01:05:18
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 01:05:18
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6812 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 01:05:06
+信号
+Signal submitted: close_short @ 1.135300, reason=server_trailing_stop, trail=1.053497
+2026/06/13 01:05:04
+信息
+Live loop ready XRP/USDT 1H, pending signals: 0
+2026/06/13 01:04:55
+信息
+Strategy execution thread started
+2026/06/13 01:04:49
+信息
+Strategy execution thread started
+2026/06/13 01:00:14
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 01:00:14
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6811 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 01:00:09
+信号
+Signal submitted: close_short @ 1.135100, reason=server_trailing_stop, trail=1.053497
+2026/06/13 01:00:09
+信息
+Bar closed XRP/USDT 1H close=1.135300 pending_signals=0
+2026/06/13 00:00:20
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/13 00:00:20
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6767 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/13 00:00:08
+信号
+Signal submitted: close_short @ 1.127900, reason=server_trailing_stop, trail=1.053497
+2026/06/13 00:00:08
+信息
+Bar closed XRP/USDT 1H close=1.127500 pending_signals=0
+2026/06/12 23:00:13
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 23:00:13
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6888 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 23:00:08
+信号
+Signal submitted: close_short @ 1.148000, reason=server_trailing_stop, trail=1.053497
+2026/06/12 23:00:08
+信息
+Bar closed XRP/USDT 1H close=1.148300 pending_signals=0
+2026/06/12 22:21:15
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 22:21:15
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6802 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 22:21:09
+信号
+Signal submitted: close_short @ 1.133700, reason=server_trailing_stop, trail=1.053497
+2026/06/12 22:21:07
+信息
+Live loop ready XRP/USDT 1H, pending signals: 0
+2026/06/12 22:21:00
+信息
+Strategy execution thread started
+2026/06/12 22:00:13
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 22:00:13
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6778 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 22:00:04
+信号
+Signal submitted: close_short @ 1.129700, reason=server_trailing_stop, trail=1.053497
+2026/06/12 22:00:04
+信息
+Bar closed XRP/USDT 1H close=1.129000 pending_signals=0
+2026/06/12 21:00:09
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 21:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6812 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 21:00:03
+信号
+Signal submitted: close_short @ 1.135400, reason=server_trailing_stop, trail=1.053497
+2026/06/12 20:00:11
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 20:00:11
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6844 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 20:00:03
+信号
+Signal submitted: close_short @ 1.140700, reason=server_trailing_stop, trail=1.053497
+2026/06/12 20:00:03
+信息
+Bar closed XRP/USDT 1H close=1.140400 pending_signals=0
+2026/06/12 19:00:09
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 19:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6859 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 19:00:03
+信号
+Signal submitted: close_short @ 1.143100, reason=server_trailing_stop, trail=1.053497
+2026/06/12 19:00:02
+信息
+Bar closed XRP/USDT 1H close=1.142700 pending_signals=0
+2026/06/12 18:59:54
+信息
+Position reconciled after close rejection (binance XRP/USDT close_short): exchange reports no position in this direction; stale local position cleared if present.
+2026/06/12 18:59:54
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6859 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 18:59:43
+信号
+Signal submitted: close_short @ 1.143200, reason=server_trailing_stop, trail=1.053497
+2026/06/12 18:59:41
+信息
+Live loop ready XRP/USDT 1H, pending signals: 0
+2026/06/12 18:59:33
+信息
+Strategy execution thread started
+2026/06/12 18:59:27
+信息
+Strategy execution thread started
+2026/06/12 18:43:38
+错误
+Exchange order failed (binance XRP/USDT close_short): Binance HTTP 400: {"code":-2022,"msg":"ReduceOnly Order is rejected."} | debug: symbol=XRPUSDT side=BUY qty_req=0.6 qty_norm=0.6 base_url=https://testnet.binancefuture.com filtersSymbol=XRPUSDT contractType=PERPETUAL stepSize=0.1 quantityPrecision=1 minNotional=5 dualSidePosition=false positionSide=n/a markPrice=0.0 notional=0；实际下单约 0.6851 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 18:43:27
+信号
+Signal submitted: close_short @ 1.141900, reason=server_trailing_stop, trail=1.053497
+2026/06/12 18:43:25
+信息
+Live loop ready XRP/USDT 1H, pending signals: 0
+2026/06/12 18:43:17
+信息
+Strategy execution thread started
+2026/06/12 18:00:11
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.14598715 notional=0.68759229 minNotional=5；实际下单约 0.6877 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 18:00:05
+信号
+Signal submitted: close_short @ 1.146200, reason=server_trailing_stop, trail=1.053497
+2026/06/12 18:00:05
+信息
+Bar closed XRP/USDT 1H close=1.146500 pending_signals=0
+2026/06/12 17:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1421 notional=0.68526 minNotional=5；实际下单约 0.6853 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 17:00:04
+信号
+Signal submitted: close_short @ 1.142200, reason=server_trailing_stop, trail=1.053497
+2026/06/12 16:00:10
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1333 notional=0.67998 minNotional=5；实际下单约 0.6797 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 16:00:04
+信号
+Signal submitted: close_short @ 1.132800, reason=server_trailing_stop, trail=1.053497
+2026/06/12 16:00:04
+信息
+Bar closed XRP/USDT 1H close=1.133300 pending_signals=0
+2026/06/12 15:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.13 notional=0.678 minNotional=5；实际下单约 0.6775 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 15:00:04
+信号
+Signal submitted: close_short @ 1.129200, reason=server_trailing_stop, trail=1.053497
+2026/06/12 15:00:04
+信息
+Bar closed XRP/USDT 1H close=1.129800 pending_signals=0
+2026/06/12 14:00:05
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1387 notional=0.68322 minNotional=5；实际下单约 0.6833 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 14:00:02
+信号
+Signal submitted: close_short @ 1.138900, reason=server_trailing_stop, trail=1.053497
+2026/06/12 14:00:02
+信息
+Bar closed XRP/USDT 1H close=1.138500 pending_signals=0
+2026/06/12 13:00:12
+信息
+Bar closed XRP/USDT 1H close=1.145600 pending_signals=1
+2026/06/12 13:00:07
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.146 notional=0.6876 minNotional=5；实际下单约 0.6874 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 13:00:02
+信号
+Signal submitted: close_short @ 1.145700, reason=server_trailing_stop, trail=1.053497
+2026/06/12 12:00:10
+信息
+Bar closed XRP/USDT 1H close=1.144000 pending_signals=1
+2026/06/12 12:00:02
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1436 notional=0.68616 minNotional=5；实际下单约 0.6860 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 12:00:00
+信号
+Signal submitted: close_short @ 1.143400, reason=server_trailing_stop, trail=1.053497
+2026/06/12 11:45:50
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1422 notional=0.68532 minNotional=5；实际下单约 0.6854 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 11:45:41
+信号
+Signal submitted: close_short @ 1.142400, reason=server_trailing_stop, trail=1.053497
+2026/06/12 11:45:39
+信息
+Live loop ready XRP/USDT 1H, pending signals: 1
+2026/06/12 11:45:30
+信息
+Strategy execution thread started
+2026/06/12 11:00:14
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.14555844 notional=0.687335064 minNotional=5；实际下单约 0.6872 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 11:00:09
+信号
+Signal submitted: close_short @ 1.145400, reason=server_trailing_stop, trail=1.053497
+2026/06/12 11:00:09
+信息
+Bar closed XRP/USDT 1H close=1.145600 pending_signals=1
+2026/06/12 10:00:13
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1397 notional=0.68382 minNotional=5；实际下单约 0.6835 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 10:00:09
+信号
+Signal submitted: close_short @ 1.139100, reason=server_trailing_stop, trail=1.053497
+2026/06/12 10:00:09
+信息
+Bar closed XRP/USDT 1H close=1.139200 pending_signals=0
+2026/06/12 09:00:13
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.14135322 notional=0.684811932 minNotional=5；实际下单约 0.6851 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 09:00:08
+信号
+Signal submitted: close_short @ 1.141800, reason=server_trailing_stop, trail=1.053497
+2026/06/12 09:00:08
+信息
+Bar closed XRP/USDT 1H close=1.141400 pending_signals=1
+2026/06/12 08:00:15
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1419 notional=0.68514 minNotional=5；实际下单约 0.6851 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 08:00:08
+信号
+Signal submitted: close_short @ 1.141900, reason=server_trailing_stop, trail=1.053497
+2026/06/12 08:00:08
+信息
+Bar closed XRP/USDT 1H close=1.141900 pending_signals=1
+2026/06/12 07:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.14168252 notional=0.685009512 minNotional=5；实际下单约 0.6855 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 07:00:08
+信号
+Signal submitted: close_short @ 1.142500, reason=server_trailing_stop, trail=1.053497
+2026/06/12 07:00:08
+信息
+Bar closed XRP/USDT 1H close=1.142200 pending_signals=1
+2026/06/12 06:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1406 notional=0.68436 minNotional=5；实际下单约 0.6841 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 06:00:08
+信号
+Signal submitted: close_short @ 1.140100, reason=server_trailing_stop, trail=1.053497
+2026/06/12 06:00:08
+信息
+Bar closed XRP/USDT 1H close=1.140400 pending_signals=1
+2026/06/12 05:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1353 notional=0.68118 minNotional=5；实际下单约 0.6808 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 05:00:07
+信号
+Signal submitted: close_short @ 1.134600, reason=server_trailing_stop, trail=1.053497
+2026/06/12 05:00:07
+信息
+Bar closed XRP/USDT 1H close=1.134600 pending_signals=0
+2026/06/12 04:00:14
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.14293905 notional=0.68576343 minNotional=5；实际下单约 0.6857 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 04:00:07
+信号
+Signal submitted: close_short @ 1.142800, reason=server_trailing_stop, trail=1.053497
+2026/06/12 04:00:07
+信息
+Bar closed XRP/USDT 1H close=1.142900 pending_signals=1
+2026/06/12 03:00:11
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1369 notional=0.68214 minNotional=5；实际下单约 0.6824 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 03:00:07
+信号
+Signal submitted: close_short @ 1.137300, reason=server_trailing_stop, trail=1.053497
+2026/06/12 03:00:07
+信息
+Bar closed XRP/USDT 1H close=1.136700 pending_signals=1
+2026/06/12 02:00:18
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1403 notional=0.68418 minNotional=5；实际下单约 0.6833 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 02:00:06
+信号
+Signal submitted: close_short @ 1.138800, reason=server_trailing_stop, trail=1.053497
+2026/06/12 02:00:06
+信息
+Bar closed XRP/USDT 1H close=1.140400 pending_signals=1
+2026/06/12 01:00:13
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.10718702 notional=0.664312212 minNotional=5；实际下单约 0.6645 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 01:00:06
+信号
+Signal submitted: close_short @ 1.107500, reason=server_trailing_stop, trail=1.053497
+2026/06/12 01:00:06
+信息
+Bar closed XRP/USDT 1H close=1.107300 pending_signals=0
+2026/06/12 00:00:17
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.11332862 notional=0.667997172 minNotional=5；实际下单约 0.6673 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/12 00:00:06
+信号
+Signal submitted: close_short @ 1.112100, reason=server_trailing_stop, trail=1.053497
+2026/06/12 00:00:06
+信息
+Bar closed XRP/USDT 1H close=1.113200 pending_signals=0
+2026/06/11 23:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1121 notional=0.66726 minNotional=5；实际下单约 0.6676 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 23:00:05
+信号
+Signal submitted: close_short @ 1.112700, reason=server_trailing_stop, trail=1.053497
+2026/06/11 23:00:05
+信息
+Bar closed XRP/USDT 1H close=1.112100 pending_signals=0
+2026/06/11 22:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1158 notional=0.66948 minNotional=5；实际下单约 0.6695 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 22:00:05
+信号
+Signal submitted: close_short @ 1.115900, reason=server_trailing_stop, trail=1.053497
+2026/06/11 22:00:05
+信息
+Bar closed XRP/USDT 1H close=1.115700 pending_signals=0
+2026/06/11 21:00:12
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.113 notional=0.6678 minNotional=5；实际下单约 0.6679 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 21:00:05
+信号
+Signal submitted: close_short @ 1.113200, reason=server_trailing_stop, trail=1.053497
+2026/06/11 21:00:05
+信息
+Bar closed XRP/USDT 1H close=1.112900 pending_signals=0
+2026/06/11 20:00:17
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1215 notional=0.6729 minNotional=5；实际下单约 0.6731 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 20:00:04
+信号
+Signal submitted: close_short @ 1.121800, reason=server_trailing_stop, trail=1.053497
+2026/06/11 20:00:04
+信息
+Bar closed XRP/USDT 1H close=1.121600 pending_signals=0
+2026/06/11 19:00:11
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.12071789 notional=0.672430734 minNotional=5；实际下单约 0.6728 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 19:00:04
+信号
+Signal submitted: close_short @ 1.121300, reason=server_trailing_stop, trail=1.053497
+2026/06/11 19:00:04
+信息
+Bar closed XRP/USDT 1H close=1.121100 pending_signals=0
+2026/06/11 18:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1167 notional=0.67002 minNotional=5；实际下单约 0.6700 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 18:00:04
+信号
+Signal submitted: close_short @ 1.116700, reason=server_trailing_stop, trail=1.053497
+2026/06/11 18:00:04
+信息
+Bar closed XRP/USDT 1H close=1.116500 pending_signals=0
+2026/06/11 17:00:16
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.12094889 notional=0.672569334 minNotional=5；实际下单约 0.6724 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 17:00:03
+信号
+Signal submitted: close_short @ 1.120600, reason=server_trailing_stop, trail=1.053497
+2026/06/11 17:00:03
+信息
+Bar closed XRP/USDT 1H close=1.120600 pending_signals=0
+2026/06/11 16:00:08
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.1155 notional=0.6693 minNotional=5；实际下单约 0.6687 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 16:00:03
+信号
+Signal submitted: close_short @ 1.114500, reason=server_trailing_stop, trail=1.053497
+2026/06/11 16:00:03
+信息
+Bar closed XRP/USDT 1H close=1.114700 pending_signals=0
+2026/06/11 15:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.11416035 notional=0.66849621 minNotional=5；实际下单约 0.6687 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 15:00:03
+信号
+Signal submitted: close_short @ 1.114500, reason=server_trailing_stop, trail=1.053497
+2026/06/11 14:00:09
+错误
+Exchange order failed (binance XRP/USDT close_short): Order notional is below MIN_NOTIONAL. symbol=XRPUSDT side=BUY qty=0.6 markPrice=1.114 notional=0.6684 minNotional=5；实际下单约 0.6685 USDT；按当前价估算至少约 5.0000 USDT；sizing=capital=0.0000, entry_pct=0.0000%, leverage=5.0000x, source=unknown；请提高投入金额、开仓比例或杠杆，或更换满足最小下单量的标的。
+2026/06/11 14:00:02
+信号
+Signal submitted: close_short @ 1.114100, reason=server_trailing_stop, trail=1.053497
