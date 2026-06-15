@@ -1,18 +1,20 @@
 ---
 name: crypto-analysis-report
 description: >-
-  加密货币深度分析与专业报告生成技能。获取实时行情、计算多周期技术指标、
-  按三支柱框架（宏观30% + 量价40% + 衍生品30%）评分，生成结构化 Markdown
-  专业分析报告。支持单币种与多币种；多币种时各自独立成报告。当用户说
-  "分析 BTC/ETH/SOL"、"生成行情报告"、"深度分析某币"、"出一份专业报告"
+  加密货币与股票/股票代币深度分析与专业报告生成技能。获取实时行情、计算多周期
+  技术指标、按三支柱框架评分（加密：宏观30%+量价40%+衍生品30%；股票：估值30%+
+  量价40%+市场30%），生成结构化 Markdown 专业分析报告。支持单标的与多标的；
+  多标的时各自独立成报告。当用户说"分析 BTC/ETH/SOL"、"分析 TSLA/NVDA/AAPL 股票"、
+  "分析特斯拉股票代币"、"生成行情报告"、"深度分析某币/某股"、"出一份专业报告"
   时使用。报告落盘到 analysis_reports/<symbol>_report_<时间戳>.md。
 ---
 
-# 加密货币深度分析报告技能
+# 加密货币 / 股票深度分析报告技能
 
 把"实时数据 → 技术指标 → 三支柱深度分析 → 专业 Markdown 报告"固化为可复用流程。
-数据走 OKX 公开行情（**免凭证、免代理**，国内可直连 okx CLI），分析框架复用本机全局
-技能 `kline-indicator`（技术分析大师）的三支柱评分法。
+**加密**走 OKX 公开行情（**免凭证、免代理**，国内可直连 okx CLI）；**股票/股票代币**走
+datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机全局技能 `kline-indicator`
+（技术分析大师）的三支柱评分法。两类标的的取数与降级策略见下方「数据源路由」。
 
 > 📖 **新人使用 + 维护管理文档**：[references/usage-and-maintenance.md](references/usage-and-maintenance.md)
 > （含提示词示例、报告速读、维护红线、改完技能的自测清单）。第一次用或要改这个技能先看它。
@@ -20,12 +22,14 @@ description: >-
 ## 何时使用
 
 - "分析 BTC / 帮我看看 ETH 行情 / 出一份 SOL 专业报告"
-- "同时分析 BTC、ETH、SOL"（多币种 → 各自独立报告）
+- "分析 TSLA / NVDA 股票 / 特斯拉股票代币"（股票分支，需 datahub MCP）
+- "同时分析 BTC、ETH、SOL"（多标的 → 各自独立报告；加密与股票可混合）
 - 需要带评分、关键价位、下一步行动清单的结构化研究报告
 
 ## 前置依赖
 
-- **okx CLI**：`npm install -g @okx_ai/okx-trade-cli`（行情命令免鉴权、免代理）。
+- **okx CLI**（基础档必需）：`npm install -g @okx_ai/okx-trade-cli`（行情命令免鉴权、免代理）。
+- **datahub MCP**（增强档可选）：`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`（重启会话生效）。配了则自动启用增强档（宏观/情绪/新闻补真实数据）；没配自动降级基础档。**股票分支必需**。
 - 全局技能 `kline-indicator` 提供三支柱框架定义（`references/three-pillars.md`）；
   本技能内置了评分口径，无该技能也可独立运行。
 
@@ -39,16 +43,51 @@ description: >-
 
 ---
 
+## 数据源路由（多所择优，报告内适用）
+
+本技能**只做分析/取数、不下单**，故仅采纳全局路由规则（[交易所技能清单 §1.3](../../docs/交易所技能清单与测试提示词.md)）中**与取数相关**的两条：规则②（能力择优）、规则③（差异交叉验证）；规则①体现为「用户指定数据源时尊重之」；规则④（下单单所）不适用。
+
+**分两档运行，自动降级，绝不因缺数据源而编造：**
+
+| 档位 | 触发条件 | 取数策略 |
+|------|----------|----------|
+| **基础档**（默认·零依赖） | 仅有 okx CLI | 全走 OKX 公开行情（免凭证免代理）。宏观面/情绪面/新闻维度**如实标「数据缺失/需额外数据源」** |
+| **增强档**（自动启用） | datahub MCP 已配（`claude mcp list` 见 datahub Connected） | 按下表能力择优补齐，把原「数据缺失」维度升级为真实数据 |
+
+**增强档能力择优表**（实测最优源）：
+
+| 维度 | 取自 | 说明 |
+|------|------|------|
+| 周期估值（AHR999/彩虹/抄底区） | **OKX** `okx market indicator ahr999/rainbow` | 原生，datahub 无 |
+| 资金费率 | **OKX** `okx market funding-rate` | datahub 不暴露 funding |
+| 多周期技术指标 | **OKX**（默认）或 technical-analysis 引擎 | 二者吻合 |
+| 宏观（利率/收益率曲线/CPI/就业） | **Bitget·datahub** `rates_yields`/`macro_indicators` | FRED 官方全套 |
+| 恐惧贪婪指数 | **Bitget·datahub** `sentiment_index` | OKX 无 |
+| 情绪/多空分层（散户vs大户/OI） | **Bitget·datahub** `derivatives_sentiment` | 可拆散户/大户+OI 趋势 |
+| 新闻简报 | **Bitget·datahub** `news_feed`（44 源） | 时效强、多空双视角 |
+| DXY/VIX | WebSearch（如可用） | 两所均无原生 |
+
+**规则③落地**：增强档若同时取到多所同类指标（如多空比 OKX vs Bitget），报告中**标注来源并交叉验证**，差异大视为信号（如散户/大户背离），不当作错误。报告头的「数据源」据实列出实际用到的源。
+
+> 这样：基础档报告与改造前完全一致（向后兼容）；增强档自动让宏观/情绪/新闻三块从「--」升级为真实数据，研判更全。
+
 ## 工作流
 
-### 第 0 步 · 解析币种列表
+### 第 0 步 · 解析标的列表并判定资产类型
 
-从用户输入提取一个或多个币种，统一成 OKX instId：
+从用户输入提取一个或多个标的，**先判定资产类型**，再走对应分支：
+
+| 资产类型 | 识别特征 | 走哪条流程 |
+|----------|----------|-----------|
+| **加密货币** | BTC / ETH / SOL / 主流币名 | 第 1A–4 步（加密三支柱，本节默认流程） |
+| **股票 / 股票代币** | TSLA / NVDA / AAPL / MSFT、"特斯拉股票"、"英伟达"、带 `ON`/`xStock` 的代币 | **见后文「股票 / 股票代币分析（资产类型扩展）」**，再回到第 3–4 步落盘 |
+
+加密统一成 OKX instId：
 - 现货 ticker / 指标：`BTC-USDT`、`ETH-USDT`、`SOL-USDT`
 - 永续（资金费率/持仓量）：`BTC-USDT-SWAP`
-- 多币种：逐个循环，**每个币走完第 1–4 步并各自落盘一份报告**。
+- 多标的：逐个循环，**每个标的走完取数→评分→落盘并各自独立成报告**；加密与股票可混合请求，各按自己的分支处理。
 
-### 第 1 步 · 拉实时数据与指标（每个币）
+### 第 1A 步 · 拉实时数据与指标（加密分支，每个币）
 
 OKX 行情命令（免凭证；指标日线周期写 `1Dutc`，K线周期写 `1D`——两者不同）：
 
@@ -65,7 +104,6 @@ okx market indicator bb  BTC-USDT --bar 1Dutc               # 布林带（日/4H
 okx market indicator bb  BTC-USDT --bar 4H
 okx market indicator kdj BTC-USDT --bar 1Dutc               # KDJ
 okx market indicator ema BTC-USDT --bar 1Dutc --params 50   # 均线结构（趋势）
-okx market indicator ema BTC-USDT --bar 1Dutc --params 200
 okx market indicator ema BTC-USDT --bar 1Dutc --params 200
 okx market indicator atr BTC-USDT --bar 1Dutc --params 14   # ATR（开仓指南/波动性/止损止盈用）
 okx market indicator ma  BTC-USDT --bar 1Dutc --params 5    # MA5/10/20（量化参数明细）
@@ -188,16 +226,16 @@ resistance = (枢轴 R1 + 20日摆动高 swing_high + 布林上轨 BB_upper) / 3
 4. **🔁 复核节奏**：<按哪个周期收盘复核哪些指标>
 5. **🔬 进阶**：如需精确仓位张数，调用 `position-sizer`
 
-### 📋 开仓指南（基于 ATR 波动率，仅供参考）
+### 📋 开仓指南（ATR×结构融合，对齐后端引擎，仅供参考）
 | 项目 | 价位 | 说明 |
 |------|------|------|
 | 当前价格 | $<价> | <24h 涨跌> |
-| 建议入场 | $<入场> | <回踩位依据：Pivot/MA> |
-| 止损价 | $<止损> | 基于 ATR（入场 ∓ 1.5×ATR<值>） |
-| 止盈目标 | $<止盈> | 基于 ATR（入场 ± 3×ATR<值>） |
+| 建议入场 | $<入场> | <回踩位依据：Pivot/MA5> |
+| 止损价 | $<止损> | max(现价−2×ATR, 支撑×0.99)；ATR=<值>，支撑=$<值> |
+| 止盈目标 | $<止盈> | min(现价+3×ATR, 阻力×1.01)；阻力=$<值> |
 | 风险回报比 | 1 : <RR> | 多/空单参考 |
 
-> 以上为基于数据的行动倾向，非投资建议。
+> 结构化支撑/阻力为三方法平均（枢轴+20日摆动+布林）。以上为基于数据的行动倾向，非投资建议。
 
 ---
 
@@ -264,8 +302,8 @@ resistance = (枢轴 R1 + 20日摆动高 swing_high + 布林上轨 BB_upper) / 3
 ## 七、详细分析
 **技术面**：<多周期/形态/结构详述>
 **衍生品面**：<资金费率/OI/多空比/挤仓详述>
-**宏观面**：<周期估值详述；非 BTC 注明数据限制>
-> 基本面深度与情绪面（DXY/VIX/新闻）需额外数据源，本技能基于 OKX 行情暂缺。
+**宏观面**：<周期估值详述；非 BTC 注明数据限制；**增强档**补 FRED 利率/CPI、恐贪指数、44 源新闻>
+> 基础档：基本面深度与情绪面（DXY/VIX/新闻）需额外数据源暂缺。**增强档（datahub 已配）**：宏观/情绪/新闻据实填真实数据并注明来源（见「数据源路由」）。
 
 ## 八、核心理由与风险
 **核心理由**：<3 条>
@@ -281,10 +319,72 @@ resistance = (枢轴 R1 + 20日摆动高 swing_high + 布林上轨 BB_upper) / 3
 
 ---
 
+## 股票 / 股票代币分析（资产类型扩展）
+
+当第 0 步判定为**股票/股票代币**时走本节，取数与评分换成股票口径，**评分完成后回到上面共享的第 3 步（渲染）、第 4 步（落盘）**。整体仍是「实时数据 → 多周期指标 → 三支柱评分 → 专业报告」，只是支柱定义与数据源不同。
+
+> ⚠️ 依赖 **datahub MCP**（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`，需重启会话载入）与 **technical-analysis** 技能的指标引擎。MCP 未配时本分支不可用，需先按 §维护文档配置。
+
+### 第 1B 步 · 拉股票数据（每个标的）
+
+**真股票**（标的本体，Yahoo Finance）——周期 `1d`/`1wk`/`1mo`，区间 `1y` 起：
+```
+datahub global_assets  action=price   symbol=TSLA              # 实时价
+datahub global_assets  action=ohlcv   symbol=TSLA interval=1d period=1y   # 日线1年（算指标/52周/均线/ATR）
+datahub cross_asset    action=correlation base=TSLA targets=ndx,spx period=90d   # 与大盘相关性（市场面）
+```
+
+**股票代币**（若用户问的是代币，或要算溢价）——Bitget 现货 K 线，符号形如 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT`/`MSFTONUSDT`：
+```
+curl -s "https://api.bitget.com/api/v2/spot/market/candles?symbol=TSLAONUSDT&granularity=1day&limit=120"
+curl -s "https://api.bitget.com/api/v2/spot/market/tickers?symbol=TSLAONUSDT"   # 代币现价/24h量
+```
+- **溢价/折价% = (代币价 − 真股价) / 真股价 × 100**（正=溢价、负=折价；折价深=潜在套利/抛压信号）。
+- 基本面（P/E、股息率、52周、财报）可选用 `binance-tokenized-securities-info` 技能补全（需代理）；拿不到则在报告标注「需额外数据源」，**不得编造**。
+
+**指标计算**——把上面任一来源的 OHLCV 喂给 **technical-analysis 引擎**（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`，已实测可吃股票/股票代币 K 线）算 RSI/MACD/BOLL/KDJ/MA/ATR；ATR 取引擎 `ATR.series.ATR`（NATR 为波动率%）。**勿用** datahub `technical_analysis` 工具算股票——它只接受 `X/USDT` 形态、仅限加密。枢轴/带宽%/区间位置/波动性公式与加密分支**完全一致**（复用上文）。
+
+### 第 2B 步 · 股票三支柱评分（每个标的）
+
+权重不变（30/40/30），把加密专属支柱替换为股票口径：
+
+| 支柱 | 权重 | 股票数据 | 打分方向 |
+|------|------|----------|----------|
+| **估值/基本面** | 30% | P/E vs 行业、52周区间位置、价 vs EMA50/200、（代币）溢价/折价 | **越低估=越利多**（替代加密的 AHR999/彩虹） |
+| **量价因子** | 40% | 多周期 RSI/MACD/BOLL/KDJ/均线（引擎与加密通用） | 0-100，越高越强势 |
+| **市场/资金面** | 30% | 成交量趋势、与纳指/标普相关性、（代币）链上溢价+持有人/流动性 | 替代加密的资金费率/OI；顺大盘+健康溢价=偏多 |
+
+`综合 = 估值×0.30 + 量价×0.40 + 市场×0.30`（0-100）；信号分区 / BUY-NEUTRAL-SELL / 置信度口径同加密分支。**诚实第一，禁止照抄样例结论。**
+
+> 注意股票特性：①**仅美股交易时段有实时波动**，盘后/周末为静态值，报告标注快照时段；②股票代币可能 24/7 交易但流动性低、溢价波动大；③无永续资金费率/OI，相关字段标注 `N/A（股票无永续合约）`。
+
+### 第 2.5B 步 · 开仓指南
+
+ATR×结构融合算法**与加密分支完全相同**（support/resistance 三方法平均 → 止损 max(价−2×ATR, 支撑×0.99)、止盈 min(价+3×ATR, 阻力×1.01)）。ATR 用日线 ATR(14)。**额外标注**：股票需考虑交易时段（跳空风险）、股票代币需标注溢价回归风险。
+
+### 第 3–4 步（共享）
+
+回到上面**共享的第 3 步渲染、第 4 步落盘**。报告模板沿用同一套，按下表做**股票版字段替换**（其余板块结构不变）：
+
+| 模板板块 | 股票版改动 |
+|----------|-----------|
+| 标题 H1 | 去掉 `/USDT`，写 `# <TICKER> 深度分析报告（股票 / 股票代币）` |
+| 报告头 | 数据源写「Yahoo Finance 真股 + Bitget 股票代币」；框架写「股票三支柱（估值30%+量价40%+市场30%）」 |
+| 一、实时市场数据 | 加：真股价 / 代币价 / **溢价折价%** / 52周高低 / 成交量；删永续 OI/资金费率行 |
+| 三、Crypto 交易大数据 | 改标题为「三、市场与资金面数据」：成交量趋势、**与纳指/标普相关性**、（代币）持有人/链上流动性；资金费率/OI = `N/A（股票无永续）` |
+| 四、三支柱评分拆解 | 用**股票三支柱**（估值/基本面、量价、市场/资金面） |
+| 七、详细分析 | 「宏观面」改为「**基本面**」：P/E/股息/财报/52周位置；「衍生品面」改为「**市场面**」：相关性/溢价/成交量 |
+| 免责声明 | 追加：证券投资风险、**股票代币溢价回归与赎回风险**、**仅美股时段实时**、非证券投资建议 |
+
+文件名：`<ticker>_report_<时间戳>.md`，ticker 小写，如 `tsla_report_20260615...md`、`nvda_report_...md`。
+
+---
+
 ## 范例参考
 
 已落盘的标准范例：`analysis_reports/btc_report_20260614175608.md`（BTC，含全部 9 个板块、
 多周期共识、开仓指南、技术指标 PRO、量化参数明细）。新报告的结构、表格粒度、免责口径应与之对齐。
+股票版报告在此基础上按「股票版字段替换」表调整支柱与数据面板。
 
 ## 多币种处理要点
 

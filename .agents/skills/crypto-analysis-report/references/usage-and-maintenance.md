@@ -7,11 +7,13 @@
 
 ## 一、这个技能是干嘛的（30 秒看懂）
 
-你说一句"分析 BTC"，它就自动：**拉 OKX 实时行情 → 算多周期技术指标 → 按三支柱打分 →
+你说一句"分析 BTC"或"分析 TSLA 股票"，它就自动：**拉实时行情 → 算多周期技术指标 → 按三支柱打分 →
 生成一份带结论、评分、关键价位、下一步行动的中文 Markdown 报告**，存到 `analysis_reports/`。
 
-- 数据免费、免登录、国内直连（走 OKX 公开行情，不用代理、不用 API Key）。
-- 一次能分析一个币，也能一次分析多个币（每个币各出一份报告）。
+- **加密分支**：走 OKX 公开行情，免费、免登录、国内直连（不用代理、不用 API Key）。
+- **股票/股票代币分支**（TSLA/NVDA/AAPL/MSFT…）：真股走 datahub `global_assets`(Yahoo)，代币走 Bitget 现货，
+  指标用 technical-analysis 引擎计算，三支柱换成「估值30%+量价40%+市场30%」。**需先配 datahub MCP**（见 4.6）。
+- 一次能分析一个标的，也能多个（每个各出一份报告，加密与股票可混合请求）。
 - 报告只做客观分析，**永远带"非投资建议"免责声明**。
 
 ---
@@ -33,6 +35,14 @@
 | 一次分析三个 | `同时分析 BTC、ETH、SOL，各出一份报告` |
 | 主流币扫描 | `给 BTC ETH SOL BNB 各生成一份深度分析报告` |
 | 自选清单 | `分析这几个币：DOGE、XRP、ADA` |
+
+### 股票 / 股票代币（需先配 datahub MCP）
+| 你想要的 | 这样说 |
+|----------|--------|
+| 分析单只股票 | `分析 TSLA 股票，出份深度报告` ／ `分析特斯拉` |
+| 分析股票代币 | `分析 TSLAON 股票代币，看溢价和技术面` |
+| 多股票 | `分析 TSLA、NVDA、AAPL 各出一份报告` |
+| 加密+股票混合 | `分析 BTC 和 TSLA，各出一份` |
 
 ### 进阶
 | 你想要的 | 这样说 |
@@ -85,9 +95,11 @@
 |----------|--------|
 | 报告板块增删/改版式 | SKILL.md「报告模板」节 + 同步更新本文「看懂报告」 |
 | 调整三支柱权重或评分口径 | SKILL.md「三支柱评分」表（注意与全局 kline-indicator 的 three-pillars.md 保持一致） |
-| 新增/替换技术指标 | SKILL.md「第 1 步」命令清单 |
-| 换数据源（如加 Binance/Bybit） | 「第 1 步」命令；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
-| 改输出路径/命名 | SKILL.md「输出约定」 |
+| 新增/替换技术指标 | SKILL.md「第 1A 步」（加密）/「第 1B 步」（股票）命令清单 |
+| 换数据源（如加 Binance/Bybit） | 对应「第 1A/1B 步」命令；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
+| 股票数据源/口径 | SKILL.md「股票/股票代币分析」节：真股 datahub `global_assets`、代币 Bitget 现货、指标 technical-analysis 引擎、相关性 `cross_asset` |
+| 调整股票三支柱 | SKILL.md「第 2B 步」表（估值/量价/市场，权重 30/40/30） |
+| 改输出路径/命名 | SKILL.md「输出约定」；股票文件名 `<ticker>_report_<时间戳>.md` |
 
 ### 4.3 维护时必须守住的红线
 1. **数据真实**：所有数值来自实时 okx 命令，**禁止编造或照抄旧报告/样例的结论**。
@@ -100,7 +112,9 @@
 - [ ] 单币种：`分析 ETH` → 生成 `analysis_reports/eth_report_<时间戳>.md`，板块齐全含「下一步」。
 - [ ] 多币种：`分析 BTC、SOL` → 生成 2 份独立文件，结论各异且与数据吻合。
 - [ ] 非 BTC 币种：宏观支柱正确降级为均线/布林近似并注明（因无 AHR999）。
-- [ ] 免责声明、时间戳、现价均正确填充。
+- [ ] **股票**：`分析 TSLA 股票` → 生成 `tsla_report_<时间戳>.md`，三支柱为「估值/量价/市场」，含溢价/52周/相关性，OI/资金费率标 N/A。
+- [ ] **股票代币溢价**：报告中「溢价% = (代币价−真股价)/真股价」计算正确。
+- [ ] 免责声明、时间戳、现价均正确填充（股票版含证券+代币溢价风险）。
 - [ ] 抽查 1 个评分：手动按权重算一遍综合分，与报告一致。
 
 ### 4.5 算法来源（对齐后端引擎，便于维护时同步）
@@ -115,6 +129,12 @@
 > 不复制（无数据源会编造），相关维度一律如实标注「数据缺失」。后端若改算法，按此处同步更新本技能。
 
 ### 4.6 依赖与环境
-- `okx` CLI：`npm install -g @okx_ai/okx-trade-cli`（行情免鉴权免代理）。
+- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。
+- **股票分支**（必须，否则不可用）：
+  - datahub MCP：`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`（第三方域名，需评估信任；**加完重启会话**才载入工具）。提供 `global_assets`(Yahoo 真股)、`cross_asset`(相关性)。
+  - technical-analysis 技能（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`）算指标；需 `pip install pandas numpy`。
+  - 股票代币 K 线走 Bitget 现货 `api.bitget.com`（符号如 `TSLAONUSDT`），免凭证。
+  - 备注：datahub `technical_analysis` 工具**仅支持加密 `X/USDT`**，股票不要用它，走 technical-analysis 引擎或自算。
 - 评分框架参考全局技能 `kline-indicator`（`~/.claude/skills/kline-indicator/references/three-pillars.md`）。
-- 相关文档：[.agents/docs/交易所技能清单与测试提示词.md](../../../docs/交易所技能清单与测试提示词.md)（OKX/Binance 技能与代理坑）。
+- 相关文档：[.agents/docs/交易所技能清单与测试提示词.md](../../../docs/交易所技能清单与测试提示词.md)（OKX/Binance/Bitget 技能、datahub MCP 与代理坑）。
+- 已落盘股票范例：`analysis_reports/tsla_report_20260615115500.md`（TSLA，股票三支柱完整版）。
