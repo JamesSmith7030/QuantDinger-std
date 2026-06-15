@@ -3,8 +3,9 @@ name: quantdinger-std
 description: >-
   QuantDinger-std（fork 自 brokermr810/QuantDinger）量化交易平台开发技能：
   项目架构、技术栈、指标/策略编写契约（IndicatorStrategy 四路信号 / ScriptStrategy）、
-  回测工作流（Agent Gateway REST + MCP）、安全红线。任何 agent 在本仓库编写指标、
-  策略、回测或修改后端代码前必读。
+  回测工作流（Agent Gateway REST + MCP）、安全红线，以及 OKX/Binance/Bitget 三所交易所
+  Agent 技能的安装与使用（行情/分析/路由）。任何 agent 在本仓库编写指标、策略、回测、
+  修改后端代码，或要安装/使用交易所行情分析技能前必读。
 ---
 
 # QuantDinger-std 开发技能
@@ -58,6 +59,7 @@ QuantDinger 是开源的 AI 量化交易自托管平台（Apache 2.0，当前版
 
 - [references/strategy-authoring.md](references/strategy-authoring.md) — 指标/策略编写契约速查（写代码时对照）
 - [references/backtest-and-api.md](references/backtest-and-api.md) — 回测与 Agent Gateway / MCP 工作流
+- [references/exchange-skills-setup.md](references/exchange-skills-setup.md) — **交易所 Agent 技能安装与使用**（OKX/Binance/Bitget 一次性安装、鉴权、网络制式、路由规则）
 - [examples/ema_cross_four_way.py](examples/ema_cross_four_way.py) — 可直接回测的四路信号模板
 - [../../docs/策略指标编写新人教程.md](../../docs/策略指标编写新人教程.md) — 零基础通俗教程（K 线/指标/策略概念、第一个双均线策略逐行讲解、三大坑、报错急救表）
 
@@ -99,6 +101,30 @@ IndicatorStrategy 强制三层分离：**指标层 → 信号层（布尔列）�
 
 需要先有 agent token（人工在 Profile → My Agent Token 签发，scope 至少 `R,B`）。
 详见 [references/backtest-and-api.md](references/backtest-and-api.md)。
+
+## 交易所 Agent 技能（行情/分析，辅助策略研究）
+
+本机另装了 OKX / Binance / Bitget 三所**全局 Agent 技能**（`~/.claude/skills/`），提供实时行情、
+70+ 技术指标、周期估值、宏观/情绪/新闻、账户与交易能力——用于**辅助策略研究**（验证想法、看
+市场状态），与 QuantDinger 平台凭证/回测**互不相通**，下单路径也不互通。
+
+新机器/新 agent **一次性安装**（详细命令+鉴权+网络制式+路由规则见
+[references/exchange-skills-setup.md](references/exchange-skills-setup.md)）：
+
+```powershell
+npm install -g @okx_ai/okx-trade-cli
+npx skills add okx/agent-skills        -g -y --copy --skill '*'   # OKX 11 个
+npx skills add Bitget-AI/agent_hub     -g -y --copy --skill '*'   # Bitget 6 个
+npx skills add binance/binance-skills-hub -g -y --copy --skill '*' # Binance 8 个
+claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp  # Bitget 4 分析技能前置（重启会话生效）
+```
+
+关键经验（完整见 setup 文档）：
+- **只读行情免鉴权**（`okx market ticker BTC-USDT` 直接能用）；账户/交易才需登录/配 Key。
+- **网络两制式互斥**：本地 Clash（设 `NODE_USE_ENV_PROXY=1`）vs 路由器透明代理（清空代理变量直连），用错必卡。
+- **多所路由**：周期估值/费率→OKX，宏观/新闻/情绪→Bitget·datahub，差异作交叉验证，下单永远单所。
+- **凭证红线**：绝不在对话接收密钥；读 env 值不打印；引导用户自行配置。
+- 本仓库项目技能 `crypto-analysis-report`（`.agents/skills/`）把上述数据封装成专业报告，已支持加密+股票。
 
 ## 本地开发与验证
 
