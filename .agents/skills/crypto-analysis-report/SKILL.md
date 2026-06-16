@@ -1,5 +1,8 @@
 ---
 name: crypto-analysis-report
+version: 1.2.0
+date: 2026-06-13
+updated: 2026-06-16
 description: >-
   加密货币与股票/股票代币深度分析与专业报告生成技能。获取实时行情、计算多周期
   技术指标、按三支柱框架评分（加密：宏观30%+量价40%+衍生品30%；股票：估值30%+
@@ -9,11 +12,20 @@ description: >-
   时使用。报告落盘到 analysis_reports/<symbol>_report_<时间戳>.md。
 ---
 
+<!-- 变更日志（维护用）：
+  v1.2.0 (2026-06-16) — 数据源唯一化：真股仅 Yahoo Finance、股票代币仅 Bitget（移除 binance-tokenized-securities-info）；新增 version/date/updated 维护字段。
+    前置依赖：明确真股=Yahoo、代币=Bitget，禁 OKX 股票永续/Binance RWA/datahub 替代
+  v1.1.0 (2026-06-15) — 新增股票/股票代币分支（股票三支柱）+ 多所数据源路由（基础档/增强档）。
+  v1.0.0 (2026-06-13) — 加密三支柱报告流程初版（OKX 行情）。
+-->
+
+
 # 加密货币 / 股票深度分析报告技能
 
 把"实时数据 → 技术指标 → 三支柱深度分析 → 专业 Markdown 报告"固化为可复用流程。
-**加密**走 OKX 公开行情（**免凭证、免代理**，国内可直连 okx CLI）；**股票/股票代币**走
-datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机全局技能 `kline-indicator`
+**加密**走 OKX 公开行情（**免凭证、免代理**，国内可直连 okx CLI）；**股票（真股）只走
+Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数据**，指标由 technical-analysis
+引擎或等价本地公式计算。分析框架复用本机全局技能 `kline-indicator`
 （技术分析大师）的三支柱评分法。两类标的的取数与降级策略见下方「数据源路由」。
 
 > 📖 **新人使用 + 维护管理文档**：[references/usage-and-maintenance.md](references/usage-and-maintenance.md)
@@ -22,14 +34,16 @@ datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机�
 ## 何时使用
 
 - "分析 BTC / 帮我看看 ETH 行情 / 出一份 SOL 专业报告"
-- "分析 TSLA / NVDA 股票 / 特斯拉股票代币"（股票分支，需 datahub MCP）
+- "分析 TSLA / NVDA 股票 / 特斯拉股票代币"（股票分支：真股仅 Yahoo Finance，股票代币仅 Bitget）
 - "同时分析 BTC、ETH、SOL"（多标的 → 各自独立报告；加密与股票可混合）
 - 需要带评分、关键价位、下一步行动清单的结构化研究报告
 
 ## 前置依赖
 
 - **okx CLI**（基础档必需）：`npm install -g @okx_ai/okx-trade-cli`（行情命令免鉴权、免代理）。
-- **datahub MCP**（增强档可选）：`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`（重启会话生效）。配了则自动启用增强档（宏观/情绪/新闻补真实数据）；没配自动降级基础档。**股票分支必需**。
+- **Yahoo Finance 公共 chart 数据**（股票真股必需）：仅用于 TSLA/NVDA/AAPL/MSFT 等真股价格、OHLCV、52 周区间、成交量等；不得用 OKX 股票映射永续、Binance RWA 或 datahub 替代。
+- **Bitget 公开股票代币现货接口**（股票代币必需）：仅用于 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT` 等股票代币价格与 OHLCV；不得用 OKX `TSLA-USDT-SWAP`/`NVDA-USDT-SWAP` 等股票映射永续替代。
+- **datahub MCP**（加密增强档可选）：仅用于加密宏观/情绪/新闻增强；**不得用于股票（真股）或股票代币取数**。
 - 全局技能 `kline-indicator` 提供三支柱框架定义（`references/three-pillars.md`）；
   本技能内置了评分口径，无该技能也可独立运行。
 
@@ -43,16 +57,22 @@ datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机�
 
 ---
 
-## 数据源路由（多所择优，报告内适用）
+## 数据源路由（唯一口径，报告内适用）
 
-本技能**只做分析/取数、不下单**，故仅采纳全局路由规则（[交易所技能清单 §1.3](../../docs/交易所技能清单与测试提示词.md)）中**与取数相关**的两条：规则②（能力择优）、规则③（差异交叉验证）；规则①体现为「用户指定数据源时尊重之」；规则④（下单单所）不适用。
+本技能**只做分析/取数、不下单**。股票相关资产采用唯一数据源口径，禁止跨源替代：
 
-**分两档运行，自动降级，绝不因缺数据源而编造：**
+| 资产类型 | 唯一取数源 | 禁止替代源 |
+|----------|------------|------------|
+| 加密货币 | OKX 公开行情；可选 datahub 只补加密宏观/情绪/新闻 | 不用股票数据源替代 |
+| 股票（真股） | **Yahoo Finance 真股 chart 数据** | 禁止 OKX 股票映射永续、Binance RWA、datahub 作为股票取数源 |
+| 股票代币 | **Bitget 股票代币现货**（如 `TSLAONUSDT`） | 禁止 OKX `TSLA-USDT-SWAP` 等股票映射永续、Binance RWA、Yahoo 代替代币价 |
+
+**加密分支**仍分两档运行，自动降级，绝不因缺数据源而编造：
 
 | 档位 | 触发条件 | 取数策略 |
 |------|----------|----------|
 | **基础档**（默认·零依赖） | 仅有 okx CLI | 全走 OKX 公开行情（免凭证免代理）。宏观面/情绪面/新闻维度**如实标「数据缺失/需额外数据源」** |
-| **增强档**（自动启用） | datahub MCP 已配（`claude mcp list` 见 datahub Connected） | 按下表能力择优补齐，把原「数据缺失」维度升级为真实数据 |
+| **增强档**（自动启用） | datahub MCP 已配（`claude mcp list` 见 datahub Connected） | 仅补加密宏观/情绪/新闻，把原「数据缺失」维度升级为真实数据 |
 
 **增强档能力择优表**（实测最优源）：
 
@@ -69,7 +89,7 @@ datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机�
 
 **规则③落地**：增强档若同时取到多所同类指标（如多空比 OKX vs Bitget），报告中**标注来源并交叉验证**，差异大视为信号（如散户/大户背离），不当作错误。报告头的「数据源」据实列出实际用到的源。
 
-> 这样：基础档报告与改造前完全一致（向后兼容）；增强档自动让宏观/情绪/新闻三块从「--」升级为真实数据，研判更全。
+> 这样：加密基础档报告与改造前完全一致（向后兼容）；加密增强档自动让宏观/情绪/新闻三块从「--」升级为真实数据。股票与股票代币不走增强档混源。
 
 ## 工作流
 
@@ -80,7 +100,8 @@ datahub(Yahoo) + Bitget + technical-analysis 引擎。分析框架复用本机�
 | 资产类型 | 识别特征 | 走哪条流程 |
 |----------|----------|-----------|
 | **加密货币** | BTC / ETH / SOL / 主流币名 | 第 1A–4 步（加密三支柱，本节默认流程） |
-| **股票 / 股票代币** | TSLA / NVDA / AAPL / MSFT、"特斯拉股票"、"英伟达"、带 `ON`/`xStock` 的代币 | **见后文「股票 / 股票代币分析（资产类型扩展）」**，再回到第 3–4 步落盘 |
+| **股票（真股）** | TSLA / NVDA / AAPL / MSFT、"特斯拉股票"、"英伟达股票" | **见后文「股票 / 股票代币分析（资产类型扩展）」**，只取 Yahoo Finance 真股 |
+| **股票代币** | 明确说"股票代币"、`TSLAON`/`TSLAONUSDT`、`NVDAON`/`NVDAONUSDT`、`xStock` | **见后文「股票 / 股票代币分析（资产类型扩展）」**，只取 Bitget 股票代币 |
 
 加密统一成 OKX instId：
 - 现货 ticker / 指标：`BTC-USDT`、`ETH-USDT`、`SOL-USDT`
@@ -327,22 +348,28 @@ resistance = (枢轴 R1 + 20日摆动高 swing_high + 布林上轨 BB_upper) / 3
 
 ### 第 1B 步 · 拉股票数据（每个标的）
 
-**真股票**（标的本体，Yahoo Finance）——周期 `1d`/`1wk`/`1mo`，区间 `1y` 起：
-```
-datahub global_assets  action=price   symbol=TSLA              # 实时价
-datahub global_assets  action=ohlcv   symbol=TSLA interval=1d period=1y   # 日线1年（算指标/52周/均线/ATR）
-datahub cross_asset    action=correlation base=TSLA targets=ndx,spx period=90d   # 与大盘相关性（市场面）
-```
+> 🔒 **数据源唯一化（硬性规定）**：**真股数据只取 Yahoo Finance；股票代币数据只取 Bitget。**
+> 二者不得混用、不得用其它来源替代（如不得用 Bitget 代币价当真股价、不得用其它交易所/技能取股票数据）。
 
-**股票代币**（若用户问的是代币，或要算溢价）——Bitget 现货 K 线，符号形如 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT`/`MSFTONUSDT`：
+**真股票**（标的本体）——**数据源唯一 = Yahoo Finance 直连**（不经 datahub，见前置依赖）。周期 `1d`，区间 `1y` 起。
+真股的**现价 / OHLCV / 52周 / 均线 / ATR / 指标 / 与大盘相关性 / 基本面**全部来自 Yahoo Finance：
+```
+# 真股 OHLCV + 现价（meta.regularMarketPrice）：
+curl -s "https://query1.finance.yahoo.com/v8/finance/chart/TSLA?range=1y&interval=1d"
+# 与大盘相关性（市场面，可选）：同样直连 Yahoo 拉 TSLA 与 ^NDX/^GSPC 日线，自算 Pearson 相关系数
+curl -s "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?range=3mo&interval=1d"   # 纳指
+```
+- 基本面（P/E、股息率、52周）若需要，**同源 Yahoo Finance**（chart meta / quoteSummary）；Yahoo 取不到则报告标注「需额外数据源」，**不得编造、不得改用其它源**。
+
+**股票代币**（用户问代币或要算溢价时）——**数据源唯一 = Bitget 现货**。符号形如 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT`/`MSFTONUSDT`：
 ```
 curl -s "https://api.bitget.com/api/v2/spot/market/candles?symbol=TSLAONUSDT&granularity=1day&limit=120"
 curl -s "https://api.bitget.com/api/v2/spot/market/tickers?symbol=TSLAONUSDT"   # 代币现价/24h量
 ```
-- **溢价/折价% = (代币价 − 真股价) / 真股价 × 100**（正=溢价、负=折价；折价深=潜在套利/抛压信号）。
-- 基本面（P/E、股息率、52周、财报）可选用 `binance-tokenized-securities-info` 技能补全（需代理）；拿不到则在报告标注「需额外数据源」，**不得编造**。
+- **溢价/折价% = (Bitget 代币价 − Yahoo 真股价) / Yahoo 真股价 × 100**（正=溢价、负=折价；折价深=潜在套利/抛压信号）。这是唯一允许跨两源的派生量（分子取 Bitget、分母取 Yahoo）。
+- 代币的现价、24h 量、K 线**只用 Bitget**；Bitget 无该代币则报告标注「该代币 Bitget 未上市/数据缺失」，**不得用真股价或其它源冒充代币价**。
 
-**指标计算**——把上面任一来源的 OHLCV 喂给 **technical-analysis 引擎**（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`，已实测可吃股票/股票代币 K 线）算 RSI/MACD/BOLL/KDJ/MA/ATR；ATR 取引擎 `ATR.series.ATR`（NATR 为波动率%）。**勿用** datahub `technical_analysis` 工具算股票——它只接受 `X/USDT` 形态、仅限加密。枢轴/带宽%/区间位置/波动性公式与加密分支**完全一致**（复用上文）。
+**指标计算**——把对应来源的 OHLCV（真股→Yahoo；代币→Bitget）喂给 **technical-analysis 引擎**（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`，已实测可吃股票/股票代币 K 线）算 RSI/MACD/BOLL/KDJ/MA/ATR；ATR 取引擎 `ATR.series.ATR`（NATR 为波动率%）。报告主体技术指标以**真股（Yahoo）**为准，代币仅用于溢价与代币持有者视角。**勿用** datahub `technical_analysis` 工具算股票——它只接受 `X/USDT` 形态、仅限加密。枢轴/带宽%/区间位置/波动性公式与加密分支**完全一致**（复用上文）。
 
 ### 第 2B 步 · 股票三支柱评分（每个标的）
 
@@ -352,7 +379,7 @@ curl -s "https://api.bitget.com/api/v2/spot/market/tickers?symbol=TSLAONUSDT"   
 |------|------|----------|----------|
 | **估值/基本面** | 30% | P/E vs 行业、52周区间位置、价 vs EMA50/200、（代币）溢价/折价 | **越低估=越利多**（替代加密的 AHR999/彩虹） |
 | **量价因子** | 40% | 多周期 RSI/MACD/BOLL/KDJ/均线（引擎与加密通用） | 0-100，越高越强势 |
-| **市场/资金面** | 30% | 成交量趋势、与纳指/标普相关性、（代币）链上溢价+持有人/流动性 | 替代加密的资金费率/OI；顺大盘+健康溢价=偏多 |
+| **市场/资金面** | 30% | 真股成交量趋势、与纳指/标普相关性（均 Yahoo 源）、（代币）Bitget 溢价/折价 | 替代加密的资金费率/OI；顺大盘+健康溢价=偏多 |
 
 `综合 = 估值×0.30 + 量价×0.40 + 市场×0.30`（0-100）；信号分区 / BUY-NEUTRAL-SELL / 置信度口径同加密分支。**诚实第一，禁止照抄样例结论。**
 
@@ -371,7 +398,7 @@ ATR×结构融合算法**与加密分支完全相同**（support/resistance 三�
 | 标题 H1 | 去掉 `/USDT`，写 `# <TICKER> 深度分析报告（股票 / 股票代币）` |
 | 报告头 | 数据源写「Yahoo Finance 真股 + Bitget 股票代币」；框架写「股票三支柱（估值30%+量价40%+市场30%）」 |
 | 一、实时市场数据 | 加：真股价 / 代币价 / **溢价折价%** / 52周高低 / 成交量；删永续 OI/资金费率行 |
-| 三、Crypto 交易大数据 | 改标题为「三、市场与资金面数据」：成交量趋势、**与纳指/标普相关性**、（代币）持有人/链上流动性；资金费率/OI = `N/A（股票无永续）` |
+| 三、Crypto 交易大数据 | 改标题为「三、市场与资金面数据」：真股成交量趋势、**与纳指/标普相关性**（Yahoo）、（代币）Bitget 溢价/折价；资金费率/OI = `N/A（股票无永续）`；链上持有人/流动性 = `N/A（Bitget 不提供，已不取 binance 源）` |
 | 四、三支柱评分拆解 | 用**股票三支柱**（估值/基本面、量价、市场/资金面） |
 | 七、详细分析 | 「宏观面」改为「**基本面**」：P/E/股息/财报/52周位置；「衍生品面」改为「**市场面**」：相关性/溢价/成交量 |
 | 免责声明 | 追加：证券投资风险、**股票代币溢价回归与赎回风险**、**仅美股时段实时**、非证券投资建议 |

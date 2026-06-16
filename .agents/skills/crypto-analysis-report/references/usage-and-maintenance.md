@@ -11,7 +11,7 @@
 生成一份带结论、评分、关键价位、下一步行动的中文 Markdown 报告**，存到 `analysis_reports/`。
 
 - **加密分支**：走 OKX 公开行情，免费、免登录、国内直连（不用代理、不用 API Key）。
-- **股票/股票代币分支**（TSLA/NVDA/AAPL/MSFT…）：真股走 datahub `global_assets`(Yahoo)，代币走 Bitget 现货，
+- **股票/股票代币分支**（TSLA/NVDA/AAPL/MSFT…，v1.2.0 起数据源唯一化）：**真股只走 Yahoo Finance 直连**（query1.finance.yahoo.com，不经 datahub），**股票代币只走 Bitget 现货**，二者禁止跨源替代；
   指标用 technical-analysis 引擎计算，三支柱换成「估值30%+量价40%+市场30%」。**需先配 datahub MCP**（见 4.6）。
 - 一次能分析一个标的，也能多个（每个各出一份报告，加密与股票可混合请求）。
 - 报告只做客观分析，**永远带"非投资建议"免责声明**。
@@ -36,7 +36,7 @@
 | 主流币扫描 | `给 BTC ETH SOL BNB 各生成一份深度分析报告` |
 | 自选清单 | `分析这几个币：DOGE、XRP、ADA` |
 
-### 股票 / 股票代币（需先配 datahub MCP）
+### 股票 / 股票代币（真股 Yahoo 直连 + 代币 Bitget，免 datahub）
 | 你想要的 | 这样说 |
 |----------|--------|
 | 分析单只股票 | `分析 TSLA 股票，出份深度报告` ／ `分析特斯拉` |
@@ -97,7 +97,7 @@
 | 调整三支柱权重或评分口径 | SKILL.md「三支柱评分」表（注意与全局 kline-indicator 的 three-pillars.md 保持一致） |
 | 新增/替换技术指标 | SKILL.md「第 1A 步」（加密）/「第 1B 步」（股票）命令清单 |
 | 换数据源（如加 Binance/Bybit） | 对应「第 1A/1B 步」命令；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
-| 股票数据源/口径 | SKILL.md「股票/股票代币分析」节：真股 datahub `global_assets`、代币 Bitget 现货、指标 technical-analysis 引擎、相关性 `cross_asset` |
+| 股票数据源/口径（唯一化 v1.2.0） | SKILL.md「股票/股票代币分析」节：**真股仅 Yahoo Finance 直连**（query1.finance.yahoo.com，含 P/E/52周/相关性，不经 datahub）、**代币仅 Bitget 现货**（价/K线/溢价）、指标 technical-analysis 引擎。**禁止** OKX 股票映射永续、Binance RWA、datahub、跨源冒充 |
 | 调整股票三支柱 | SKILL.md「第 2B 步」表（估值/量价/市场，权重 30/40/30） |
 | 改输出路径/命名 | SKILL.md「输出约定」；股票文件名 `<ticker>_report_<时间戳>.md` |
 
@@ -129,12 +129,12 @@
 > 不复制（无数据源会编造），相关维度一律如实标注「数据缺失」。后端若改算法，按此处同步更新本技能。
 
 ### 4.6 依赖与环境
-- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。
-- **股票分支**（必须，否则不可用）：
-  - datahub MCP：`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`（第三方域名，需评估信任；**加完重启会话**才载入工具）。提供 `global_assets`(Yahoo 真股)、`cross_asset`(相关性)。
-  - technical-analysis 技能（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`）算指标；需 `pip install pandas numpy`。
-  - 股票代币 K 线走 Bitget 现货 `api.bitget.com`（符号如 `TSLAONUSDT`），免凭证。
-  - 备注：datahub `technical_analysis` 工具**仅支持加密 `X/USDT`**，股票不要用它，走 technical-analysis 引擎或自算。
+- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。加密增强档（宏观/情绪/新闻）可选 datahub MCP（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`）——**仅加密用，股票不用**。
+- **股票分支**（v1.2.0 数据源唯一化）：
+  - **真股：Yahoo Finance 直连**（`https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>`），免凭证、不经 datahub。价/OHLCV/52周/相关性/基本面全部 Yahoo。
+  - **股票代币：Bitget 现货直连**（`https://api.bitget.com/api/v2/spot/market/...`，符号如 `TSLAONUSDT`），免凭证。仅取价/24h量/K线，用于溢价与代币视角。
+  - 指标：technical-analysis 技能（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`）；需 `pip install pandas numpy`。
+  - 备注：datahub `technical_analysis`/`global_assets` 等**不用于股票取数**（唯一源规定）；datahub `technical_analysis` 仅支持加密 `X/USDT`。
 - 评分框架参考全局技能 `kline-indicator`（`~/.claude/skills/kline-indicator/references/three-pillars.md`）。
 - 相关文档：[.agents/docs/交易所技能清单与测试提示词.md](../../../docs/交易所技能清单与测试提示词.md)（OKX/Binance/Bitget 技能、datahub MCP 与代理坑）。
 - 已落盘股票范例：`analysis_reports/tsla_report_20260615115500.md`（TSLA，股票三支柱完整版）。
