@@ -1,5 +1,5 @@
 my_indicator_name = "v2.0.5(ETH4H双+253.20)-30f-双均线策略"
-my_indicator_description = "优化参数版双均线交叉策略：短期8/长期34均线，降低过度交易并改善风险调整收益"
+my_indicator_description = "优化参数版双均线交叉策略：短期25/长期40均线，降低过度交易并改善风险调整收益"
 # 回测参数（开单参数） 标的：ETH 日期：3Y  杠杆：3x  交易方向：双向
 
 # @param sma_short int 25 短期均线周期
