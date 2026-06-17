@@ -135,15 +135,29 @@ output = {
 
 ## 8. 高频错误清单（自检）
 
-1. 声明 `# @param` 却硬编码数值。
-2. `buy/sell` 每根 bar 连续触发（缺边缘触发）。
-3. `shift(-1)` 未来函数 → 回测虚高。
-4. `# @strategy leverage 10` → 非法 key。
-5. `both` 模式把空侧 tp/sl 塞进 `buy` 列，期待「仅平空」→ 实际会反手开多。
-6. 指标内窄 tp/sl + `trailingEnabled true` 并存 → 双重平仓。
-7. plot/signal 的 `data` 长度 ≠ `len(df)` → 渲染报错。
-8. ScriptStrategy 想全平却写 `ctx.sell()`。
-9. NaN 未清理（rolling/ewm 前导 NaN）就比较。
+1. **`# @param` 声明的默认值 ≠ 代码 `params.get(name, X)` 的回退默认 X**。两处必须一致，
+   否则漏传参时实盘静默跑成另一套参数（与回测/描述不符）。这是最隐蔽的一类 bug。
+2. **边缘触发反模式 `~s.shift(1).fillna(False)`**：bool 经 `shift` 变 object，`~` 得到
+   `-1/-2` 整数而非布尔（pandas 3.x 坑），信号静默错乱。固定写法：
+   `prev = s.shift(1).fillna(False).astype(bool); edge = (s & ~prev).astype(bool)`。
+   （交叉信号本就是单根、可不去重；`rsi<阈值` 这类会连续多根为真，去重必需。）
+3. **沙盒禁 `pd.api` / `.core` / `.io` 等属性**（`safe_exec` 黑名单）：用了
+   `pd.api.types.is_datetime64_any_dtype` / `is_numeric_dtype` 会被校验拒 →
+   `indicator execution failed` 自动停。改用 `s.dtype.kind`：`'M'`=datetime、
+   `'i'/'u'/'f'/'b'`=数值。离线自检无此校验，**只在实盘沙箱暴露**。
+4. `shift(-1)` 未来函数 → 回测虚高。
+5. `# @strategy leverage 10` → 非法 key（杠杆属产品配置层）。
+6. `both` 模式把空侧 tp/sl 塞进 `buy` 列，期待「仅平空」→ 实际会反手开多。
+7. 指标内窄 tp/sl + `trailingEnabled true` 并存 → 双重平仓（用 `# exit_owner` 声明归属）。
+8. **零止损裸跑**：`stopLossPct 0` + `takeProfitPct 0` + `trailingEnabled false` 且仅靠
+   反向信号离场 → 趋势行情可无限亏。至少给一道引擎硬止损或启用 trailing 兜底。
+9. plot/signal 的 `data` 长度 ≠ `len(df)` → 渲染报错。
+10. ScriptStrategy 想全平却写 `ctx.sell()`。
+11. NaN 未清理（rolling/ewm 前导 NaN）就比较。
+
+> 注：1/2/3/8 是 2026-06-17 review v1.3.4 / v2.0.5 / PowerTower 三个实盘策略时反复发现的真实坑。
+> 改完务必 `python examples/_verify_template.py <脚本>` 离线自检——但注意它**不含沙箱校验**，
+> 第 3 条（pd.api）需在实盘沙箱才暴露，编写时主动避开。
 
 ## 9. 现成示例
 

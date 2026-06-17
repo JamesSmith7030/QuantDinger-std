@@ -1,8 +1,8 @@
 ---
 name: quantdinger-std
-version: 1.1.0
+version: 1.1.1
 date: 2026-06-11
-updated: 2026-06-16
+updated: 2026-06-17
 description: >-
   QuantDinger-std（fork 自 brokermr810/QuantDinger）量化交易平台开发技能：
   项目架构、技术栈、指标/策略编写契约（IndicatorStrategy 四路信号 / ScriptStrategy）、
@@ -12,6 +12,7 @@ description: >-
 ---
 
 <!-- 变更日志（维护用）：
+  v1.1.1 (2026-06-17) — strategy-authoring.md 高频错误清单补 3 条实战坑（@param默认≠代码回退默认、~shift(1)边缘触发反模式、沙箱禁 pd.api）+ 零止损裸跑，来自 v1.3.4/v2.0.5/PowerTower 三策略 review。
   v1.1.0 (2026-06-16) — 新增 references/exchange-skills-setup.md（OKX/Binance/Bitget 三所安装+鉴权+网络制式+路由规则）+「交易所 Agent 技能」章节；新增 version/date/updated 维护字段。
   v1.0.0 (2026-06-11) — 平台开发技能初版（架构/策略契约/回测/后端规则/安全红线）。
 -->
