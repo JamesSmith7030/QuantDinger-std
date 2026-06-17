@@ -40,7 +40,7 @@
 | 你想要的 | 这样说 |
 |----------|--------|
 | 分析单只股票 | `分析 TSLA 股票，出份深度报告` ／ `分析特斯拉` |
-| 分析股票代币 | `分析 TSLAON 股票代币，看溢价和技术面` |
+| 分析股票代币 | `分析 TSLAUSDT 股票代币，看溢价和技术面`（用 Bitget R 系 RTSLAUSDT） |
 | 多股票 | `分析 TSLA、NVDA、AAPL 各出一份报告` |
 | 加密+股票混合 | `分析 BTC 和 TSLA，各出一份` |
 
@@ -132,7 +132,7 @@
 - **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。加密增强档（宏观/情绪/新闻）可选 datahub MCP（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`）——**仅加密用，股票不用**。
 - **股票分支**（v1.2.0 数据源唯一化）：
   - **真股：Yahoo Finance 直连**（`https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>`），免凭证、不经 datahub。价/OHLCV/52周/相关性/基本面全部 Yahoo。
-  - **股票代币：Bitget 现货直连**（`https://api.bitget.com/api/v2/spot/market/...`，符号如 `TSLAONUSDT`），免凭证。仅取价/24h量/K线，用于溢价与代币视角。
+  - **股票代币：Bitget 现货直连**（`https://api.bitget.com/api/v2/spot/market/...`），免凭证。**首选 R 系 `RTSLAUSDT`/`RNVDAUSDT`**（流动性高，24h 量千万级）；ON 系 `TSLAONUSDT`/`NVDAONUSDT` 几乎无量、仅备用。裸 `TSLAUSDT`/`NVDAUSDT` 不存在。仅取价/24h量/K线，用于溢价与代币视角。
   - 指标：technical-analysis 技能（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`）；需 `pip install pandas numpy`。
   - 备注：datahub `technical_analysis`/`global_assets` 等**不用于股票取数**（唯一源规定）；datahub `technical_analysis` 仅支持加密 `X/USDT`。
 - 评分框架参考全局技能 `kline-indicator`（`~/.claude/skills/kline-indicator/references/three-pillars.md`）。

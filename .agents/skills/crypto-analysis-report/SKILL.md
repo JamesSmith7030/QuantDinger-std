@@ -1,6 +1,6 @@
 ---
 name: crypto-analysis-report
-version: 1.2.0
+version: 1.2.1
 date: 2026-06-13
 updated: 2026-06-16
 description: >-
@@ -13,6 +13,7 @@ description: >-
 ---
 
 <!-- 变更日志（维护用）：
+  v1.2.1 (2026-06-16) — 股票代币 Bitget 符号改用 R 系 RTSLAUSDT/RNVDAUSDT（流动性高，24h 量千万级）替代近乎僵尸的 ON 系 TSLAONUSDT/NVDAONUSDT；裸 TSLAUSDT/NVDAUSDT 在 Bitget 不存在。
   v1.2.0 (2026-06-16) — 数据源唯一化：真股仅 Yahoo Finance、股票代币仅 Bitget（移除 binance-tokenized-securities-info）；新增 version/date/updated 维护字段。
     前置依赖：明确真股=Yahoo、代币=Bitget，禁 OKX 股票永续/Binance RWA/datahub 替代
   v1.1.0 (2026-06-15) — 新增股票/股票代币分支（股票三支柱）+ 多所数据源路由（基础档/增强档）。
@@ -42,7 +43,7 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 
 - **okx CLI**（基础档必需）：`npm install -g @okx_ai/okx-trade-cli`（行情命令免鉴权、免代理）。
 - **Yahoo Finance 公共 chart 数据**（股票真股必需）：仅用于 TSLA/NVDA/AAPL/MSFT 等真股价格、OHLCV、52 周区间、成交量等；不得用 OKX 股票映射永续、Binance RWA 或 datahub 替代。
-- **Bitget 公开股票代币现货接口**（股票代币必需）：仅用于 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT` 等股票代币价格与 OHLCV；不得用 OKX `TSLA-USDT-SWAP`/`NVDA-USDT-SWAP` 等股票映射永续替代。
+- **Bitget 公开股票代币现货接口**（股票代币必需）：用 **R 系 `RTSLAUSDT`/`RNVDAUSDT`**（流动性高、24h 量千万级，**首选**）；ON 系 `TSLAONUSDT`/`NVDAONUSDT`（Ondo）几乎无成交、溢价参考性弱，仅在 R 系无该标的时备用。不得用 OKX `TSLA-USDT-SWAP` 等股票映射永续替代。
 - **datahub MCP**（加密增强档可选）：仅用于加密宏观/情绪/新闻增强；**不得用于股票（真股）或股票代币取数**。
 - 全局技能 `kline-indicator` 提供三支柱框架定义（`references/three-pillars.md`）；
   本技能内置了评分口径，无该技能也可独立运行。
@@ -65,7 +66,7 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 |----------|------------|------------|
 | 加密货币 | OKX 公开行情；可选 datahub 只补加密宏观/情绪/新闻 | 不用股票数据源替代 |
 | 股票（真股） | **Yahoo Finance 真股 chart 数据** | 禁止 OKX 股票映射永续、Binance RWA、datahub 作为股票取数源 |
-| 股票代币 | **Bitget 股票代币现货**（如 `TSLAONUSDT`） | 禁止 OKX `TSLA-USDT-SWAP` 等股票映射永续、Binance RWA、Yahoo 代替代币价 |
+| 股票代币 | **Bitget 股票代币现货**（首选 R 系 `RTSLAUSDT`/`RNVDAUSDT`，流动性高；ON 系备用） | 禁止 OKX `TSLA-USDT-SWAP` 等股票映射永续、Binance RWA、Yahoo 代替代币价 |
 
 **加密分支**仍分两档运行，自动降级，绝不因缺数据源而编造：
 
@@ -101,7 +102,7 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 |----------|----------|-----------|
 | **加密货币** | BTC / ETH / SOL / 主流币名 | 第 1A–4 步（加密三支柱，本节默认流程） |
 | **股票（真股）** | TSLA / NVDA / AAPL / MSFT、"特斯拉股票"、"英伟达股票" | **见后文「股票 / 股票代币分析（资产类型扩展）」**，只取 Yahoo Finance 真股 |
-| **股票代币** | 明确说"股票代币"、`TSLAON`/`TSLAONUSDT`、`NVDAON`/`NVDAONUSDT`、`xStock` | **见后文「股票 / 股票代币分析（资产类型扩展）」**，只取 Bitget 股票代币 |
+| **股票代币** | 明确说"股票代币"、`TSLAUSDT代币`、`RTSLAUSDT`/`RNVDAUSDT`、`TSLAON`、`xStock` | **见后文「股票 / 股票代币分析（资产类型扩展）」**，只取 Bitget 股票代币（首选 R 系） |
 
 加密统一成 OKX instId：
 - 现货 ticker / 指标：`BTC-USDT`、`ETH-USDT`、`SOL-USDT`
@@ -361,11 +362,14 @@ curl -s "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?range=3mo&inte
 ```
 - 基本面（P/E、股息率、52周）若需要，**同源 Yahoo Finance**（chart meta / quoteSummary）；Yahoo 取不到则报告标注「需额外数据源」，**不得编造、不得改用其它源**。
 
-**股票代币**（用户问代币或要算溢价时）——**数据源唯一 = Bitget 现货**。符号形如 `TSLAONUSDT`/`NVDAONUSDT`/`AAPLONUSDT`/`MSFTONUSDT`：
+**股票代币**（用户问代币或要算溢价时）——**数据源唯一 = Bitget 现货**。
+**首选 R 系**（流动性高、24h 量千万级，溢价参考可靠）：`RTSLAUSDT`/`RNVDAUSDT`（用户写的 `TSLAUSDT/NVDAUSDT` 即此系列）。
+ON 系（Ondo）`TSLAONUSDT`/`NVDAONUSDT` 几乎无成交（24h 仅几百量），仅在 R 系无对应标的时备用，并在报告注明流动性极低。
 ```
-curl -s "https://api.bitget.com/api/v2/spot/market/candles?symbol=TSLAONUSDT&granularity=1day&limit=120"
-curl -s "https://api.bitget.com/api/v2/spot/market/tickers?symbol=TSLAONUSDT"   # 代币现价/24h量
+curl -s "https://api.bitget.com/api/v2/spot/market/candles?symbol=RTSLAUSDT&granularity=1day&limit=120"
+curl -s "https://api.bitget.com/api/v2/spot/market/tickers?symbol=RTSLAUSDT"   # 代币现价/24h量
 ```
+> 取数前可先 `https://api.bitget.com/api/v2/spot/public/symbols` 过滤 `TSLA`/`NVDA` 确认在售符号；裸 `TSLAUSDT`/`NVDAUSDT` 在 Bitget 不存在（HTTP 400）。
 - **溢价/折价% = (Bitget 代币价 − Yahoo 真股价) / Yahoo 真股价 × 100**（正=溢价、负=折价；折价深=潜在套利/抛压信号）。这是唯一允许跨两源的派生量（分子取 Bitget、分母取 Yahoo）。
 - 代币的现价、24h 量、K 线**只用 Bitget**；Bitget 无该代币则报告标注「该代币 Bitget 未上市/数据缺失」，**不得用真股价或其它源冒充代币价**。
 
