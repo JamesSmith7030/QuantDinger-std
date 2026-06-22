@@ -59,8 +59,22 @@ def run_okx(args: list[str]) -> str:
         cmd = [shell, "-NoProfile", "-Command", f"& {quoted}"]
     else:
         cmd = ["okx", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", check=True)
-    return proc.stdout.strip()
+    last_error: subprocess.CalledProcessError | None = None
+    for attempt in range(3):
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                check=True,
+            )
+            return proc.stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            time.sleep(1 + attempt)
+    raise last_error if last_error else RuntimeError(f"okx command failed: {args}")
 
 
 def parse_key_value_table(text: str) -> dict[str, str]:
@@ -150,21 +164,36 @@ def parse_candles(text: str) -> list[dict[str, float]]:
     rows: list[dict[str, float]] = []
     for line in text.splitlines():
         line = line.strip()
-        if not line or line.startswith("---") or "|" in line or line.startswith("ts") or line.startswith("time"):
+        if (
+            not line
+            or line.startswith("---")
+            or line.startswith("Environment:")
+            or line.startswith("time")
+            or line.startswith("ts")
+        ):
             continue
-        parts = re.split(r"\s+", line)
-        if len(parts) >= 7 and re.match(r"^\d{4}/\d", parts[0]):
-            stamp = datetime.strptime(f"{parts[0]} {parts[1]}", "%Y/%m/%d %H:%M:%S").timestamp()
-            rows.append(
-                {
-                    "ts": float(stamp),
-                    "open": float(parts[2]),
-                    "high": float(parts[3]),
-                    "low": float(parts[4]),
-                    "close": float(parts[5]),
-                    "volume": float(parts[6]),
-                }
-            )
+        match = re.match(
+            r"^(?P<dt>\d{1,2}/\d{1,2}/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+"
+            r"(?P<open>-?\d+(?:\.\d+)?)\s+"
+            r"(?P<high>-?\d+(?:\.\d+)?)\s+"
+            r"(?P<low>-?\d+(?:\.\d+)?)\s+"
+            r"(?P<close>-?\d+(?:\.\d+)?)\s+"
+            r"(?P<volume>-?\d+(?:\.\d+)?)$",
+            line,
+        )
+        if not match:
+            continue
+        stamp = datetime.strptime(match.group("dt"), "%m/%d/%Y, %I:%M:%S %p").timestamp()
+        rows.append(
+            {
+                "ts": float(stamp),
+                "open": float(match.group("open")),
+                "high": float(match.group("high")),
+                "low": float(match.group("low")),
+                "close": float(match.group("close")),
+                "volume": float(match.group("volume")),
+            }
+        )
     return rows
 
 
