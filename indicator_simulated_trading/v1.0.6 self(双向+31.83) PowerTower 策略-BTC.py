@@ -1,4 +1,4 @@
-my_indicator_name = "v1.0.6(双向+31.83) PowerTower 策略-BTC/USDT"
+my_indicator_name = "v1.0.6 self(双向+31.83) PowerTower 策略-BTC/USDT"
 my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 RSI 周期与更严格且对称的超买超卖阈值，减少过度交易并提升风险调整收益。"
 # 回测参数（开单参数） 标的：BTC K线周期：1H 日期范围：2Y  杠杆：1x  交易方向：双向
 # 模拟开单参数 标的：BTC K线周期：1H  杠杆：5x  交易方向：双向
@@ -15,9 +15,9 @@ my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 R
 # @param buy_threshold float 24 Oversold threshold
 # @param sell_threshold float 76 Overbought threshold
 
-rsi_len = params.get('rsi_len', 18)
-buy_threshold = params.get('buy_threshold', 22.0)
-sell_threshold = params.get('sell_threshold', 78.0)
+rsi_len = params.get('rsi_len', 14)
+buy_threshold = params.get('buy_threshold', 24)
+sell_threshold = params.get('sell_threshold', 76)
 
 df = df.copy()
 
