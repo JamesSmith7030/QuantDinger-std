@@ -173,7 +173,8 @@ def parse_candles(text: str) -> list[dict[str, float]]:
         ):
             continue
         match = re.match(
-            r"^(?P<dt>\d{1,2}/\d{1,2}/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+"
+            r"^(?P<dt>(?:\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}|"
+            r"\d{1,2}/\d{1,2}/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M))\s+"
             r"(?P<open>-?\d+(?:\.\d+)?)\s+"
             r"(?P<high>-?\d+(?:\.\d+)?)\s+"
             r"(?P<low>-?\d+(?:\.\d+)?)\s+"
@@ -183,7 +184,9 @@ def parse_candles(text: str) -> list[dict[str, float]]:
         )
         if not match:
             continue
-        stamp = datetime.strptime(match.group("dt"), "%m/%d/%Y, %I:%M:%S %p").timestamp()
+        dt_text = match.group("dt")
+        dt_format = "%Y/%m/%d %H:%M:%S" if "," not in dt_text else "%m/%d/%Y, %I:%M:%S %p"
+        stamp = datetime.strptime(dt_text, dt_format).timestamp()
         rows.append(
             {
                 "ts": float(stamp),
@@ -374,7 +377,7 @@ def fetch_okx_crypto(symbol: str) -> dict[str, Any]:
     kdj_1d = parse_kdj(run_okx(["market", "indicator", "kdj", inst, "--bar", "1Dutc"]))
     candles = parse_candles(run_okx(["market", "candles", inst, "--bar", "1D", "--limit", "30"]))
     funding = parse_key_value_table(run_okx(["market", "funding-rate", swap]))
-    oi = parse_key_value_table(run_okx(["market", "open-interest", "--instType", "SWAP", "--instId", swap]))
+    oi_text = run_okx(["market", "open-interest", "--instType", "SWAP", "--instId", swap])
     price = float(ticker["last"])
     day_change = float(ticker["24h change %"].replace("%", ""))
     daily = pd.DataFrame(candles).sort_values("ts").reset_index(drop=True)
@@ -396,11 +399,11 @@ def fetch_okx_crypto(symbol: str) -> dict[str, Any]:
     if symbol == "BTC":
         try:
             ahr = parse_single_indicator_value(run_okx(["market", "indicator", "ahr999", inst, "--bar", "1Dutc"]))
-            macro_score = 25 if ahr < 0.45 else 35 if ahr < 0.8 else 50 if ahr < 1.2 else 68
+            macro_score = 75 if ahr < 0.45 else 65 if ahr < 0.8 else 50 if ahr < 1.2 else 32
         except subprocess.CalledProcessError:
             macro_score = 52
     else:
-        macro_score = 42 if price > ema50 > ema200 else 55 if price > ema50 else 62
+        macro_score = 68 if price > ema50 > ema200 else 55 if price > ema50 else 38
     qty_score = 50
     qty_score += 8 if rsi_1d > 55 else -8 if rsi_1d < 45 else 0
     qty_score += 8 if macd_1d["hist"] > 0 else -8
@@ -408,12 +411,20 @@ def fetch_okx_crypto(symbol: str) -> dict[str, Any]:
     qty_score += 4 if kdj_1d["j"] < 20 else -4 if kdj_1d["j"] > 80 else 0
     qty_score = max(20, min(80, qty_score))
     funding_rate = float(funding.get("fundingRate", "0"))
-    oi_value = float(oi.get("oi", oi.get("openInterest", "0")))
+    oi_match = re.search(rf"^{re.escape(swap)}\s+\S+\s+(\S+)", oi_text, re.MULTILINE)
+    oi_value = float(oi_match.group(1)) if oi_match else 0.0
     der_score = 50 + (10 if funding_rate < 0 else -6 if funding_rate > 0.0005 else 0) + (4 if oi_value > 0 else 0)
     der_score = max(25, min(75, der_score))
     composite = int(round(macro_score * 0.30 + qty_score * 0.40 + der_score * 0.30))
     direction, agreement, total = coin_consensus(rsi_1h, rsi_4h, rsi_1d, macd_4h["hist"], macd_1d["hist"])
-    signal, signal_cn, confidence = signal_bucket(composite)
+    score_signal, _, confidence = signal_bucket(composite)
+    strong_consensus = (
+        direction == "SELL" and agreement >= 80 and qty_score <= 45
+    ) or (
+        direction == "BUY" and agreement >= 80 and qty_score >= 55
+    )
+    signal = direction if strong_consensus else score_signal if score_signal == direction else "NEUTRAL"
+    signal_cn = signal_bucket(50 if signal == "NEUTRAL" else composite)[1]
     entry = ma5 if signal == "BUY" else resistance if signal == "SELL" else pivot
     stop = max(price - 2 * atr_1d, support * 0.99) if signal != "SELL" else min(price + 2 * atr_1d, resistance * 1.01)
     take = min(price + 3 * atr_1d, resistance * 1.01) if signal != "SELL" else max(price - 3 * atr_1d, support * 0.99)
