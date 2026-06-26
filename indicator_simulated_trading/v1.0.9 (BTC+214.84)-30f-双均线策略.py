@@ -24,8 +24,8 @@
 # @param sma_long int 25 长期均线周期
 
 # === 获取参数 (带默认值作为后备) ===
-sma_short_period = params.get('sma_short', 5)
-sma_long_period = params.get('sma_long', 20)
+sma_short_period = params.get('sma_short', 6)
+sma_long_period = params.get('sma_long', 25)
 
 # === 指标信息 ===
 my_indicator_name = "v1.0.9 (BTC+214.84)-30f-双均线策略"
