@@ -13,6 +13,7 @@
 
 # 回测参数 标的: BTC, K线周期: 1D, 日期范围: 3Y, 杠杆: 3x, 交易方向: 双向, 回测收益: +214.84%
 
+# === 风控配置（@strategy） ===
 # @strategy stopLossPct 0.03
 # @strategy takeProfitPct 0.075
 # @strategy entryPct 0.5
