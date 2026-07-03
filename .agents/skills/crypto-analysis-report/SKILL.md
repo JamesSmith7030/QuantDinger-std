@@ -1,8 +1,8 @@
 ---
 name: crypto-analysis-report
-version: 1.2.2
+version: 1.2.3
 date: 2026-06-13
-updated: 2026-06-19
+updated: 2026-07-03
 description: >-
   加密货币与股票/股票代币深度分析与专业报告生成技能。获取实时行情、计算多周期
   技术指标、按三支柱框架评分（加密：宏观30%+量价40%+衍生品30%；股票：估值30%+
@@ -13,6 +13,7 @@ description: >-
 ---
 
 <!-- 变更日志（维护用）：
+  v1.2.3 (2026-07-03) — 第 1A 步 MACD 组补 15m 周期（`--bar 15m`），与既有 15m RSI 交叉印证，消除 15m 孤儿信号；服务短线（1-3天/日频）入场择时。周期矩阵仍为 15m/1H/4H/1Dutc，未加 1W（短线持仓 1D 背景已足）。
   v1.2.2 (2026-06-19) — 开仓指南强化双向：方向由数据决定（偏多确认→做多 / 偏空确认→做空镜像 / 多空交织→HOLD 只显当前价），明令禁止默认做多；中性偏多/偏空仅为倾向标注、非成交方向。
   v1.2.1 (2026-06-16) — 股票代币 Bitget 符号改用 R 系 RTSLAUSDT/RNVDAUSDT（流动性高，24h 量千万级）替代近乎僵尸的 ON 系 TSLAONUSDT/NVDAONUSDT；裸 TSLAUSDT/NVDAUSDT 在 Bitget 不存在。
   v1.2.0 (2026-06-16) — 数据源唯一化：真股仅 Yahoo Finance、股票代币仅 Bitget（移除 binance-tokenized-securities-info）；新增 version/date/updated 维护字段。
@@ -120,6 +121,7 @@ okx market indicator rsi BTC-USDT --bar 15m                 # 多周期 RSI
 okx market indicator rsi BTC-USDT --bar 1H
 okx market indicator rsi BTC-USDT --bar 4H
 okx market indicator rsi BTC-USDT --bar 1Dutc
+okx market indicator macd BTC-USDT --bar 15m                # 15m 入场择时印证（与 15m RSI 交叉，避免孤儿信号）
 okx market indicator macd BTC-USDT --bar 1H                 # 多周期 MACD
 okx market indicator macd BTC-USDT --bar 4H
 okx market indicator macd BTC-USDT --bar 1Dutc
