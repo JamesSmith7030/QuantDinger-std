@@ -11,7 +11,7 @@ hybin 发布于: 5/13/2026
 适用周期：1H, 15m, 30m, 4H, 5m
 """
 
-my_indicator_name = "Price Action & Volume Confluence"
+my_indicator_name = "150f-Price Action & Volume Confluence"
 my_indicator_description = "结合均线趋势、裸K价格行为（Pin Bar/吞没形态）与成交量放大的顺势回调策略。"
 
 # --- 1. 参数声明 (Params) ---
