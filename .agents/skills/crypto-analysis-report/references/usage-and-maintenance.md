@@ -85,7 +85,8 @@
 .agents/skills/crypto-analysis-report/
 ├── SKILL.md                          # 主体：工作流 + 评分口径 + 报告模板
 └── references/
-    └── usage-and-maintenance.md      # 本文件：使用文档 + 维护指南
+    ├── usage-and-maintenance.md      # 本文件：使用文档 + 维护指南
+    └── pull_okx_data.py              # 加密分支取数脚本：内置重试 + 字段完整性校验
 ```
 落盘产物在仓库根 `analysis_reports/`（不在技能目录内）。
 
@@ -95,7 +96,8 @@
 |----------|--------|
 | 报告板块增删/改版式 | SKILL.md「报告模板」节 + 同步更新本文「看懂报告」 |
 | 调整三支柱权重或评分口径 | SKILL.md「三支柱评分」表（注意与全局 kline-indicator 的 three-pillars.md 保持一致） |
-| 新增/替换技术指标 | SKILL.md「第 1A 步」（加密）/「第 1B 步」（股票）命令清单 |
+| 新增/替换技术指标 | SKILL.md「第 1A 步」（加密）/「第 1B 步」（股票）命令清单；加密分支同步改 `references/pull_okx_data.py` 里 `build_sections()` 的命令与校验正则 |
+| okx 拉取偶发空输出/字段缺失（网络抖动） | 用 `references/pull_okx_data.py` 而非手写 bash：内置重试（默认 2 次、间隔 1-2s）+ 字段校验，仍失败会在 `<SYM>.txt` 写 `[FETCH_FAILED: 原因]` 并汇总报错退出，不会让下游 parse 静默拿到空值 |
 | 换数据源（如加 Binance/Bybit） | 对应「第 1A/1B 步」命令；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
 | 股票数据源/口径（唯一化 v1.2.0） | SKILL.md「股票/股票代币分析」节：**真股仅 Yahoo Finance 直连**（query1.finance.yahoo.com，含 P/E/52周/相关性，不经 datahub）、**代币仅 Bitget 现货**（价/K线/溢价）、指标 technical-analysis 引擎。**禁止** OKX 股票映射永续、Binance RWA、datahub、跨源冒充 |
 | 调整股票三支柱 | SKILL.md「第 2B 步」表（估值/量价/市场，权重 30/40/30） |
@@ -129,7 +131,7 @@
 > 不复制（无数据源会编造），相关维度一律如实标注「数据缺失」。后端若改算法，按此处同步更新本技能。
 
 ### 4.6 依赖与环境
-- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。加密增强档（宏观/情绪/新闻）可选 datahub MCP（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`）——**仅加密用，股票不用**。
+- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。取数推荐用 `references/pull_okx_data.py`（纯标准库，Python 3.9+ 即可，无需额外 pip 依赖）；Windows 上 `okx` 是 npm 装的 `.cmd` 包装脚本，脚本内部已对 Windows 走 `shell=True` 规避 `subprocess` 找不到 `.cmd` 的坑，直接调用即可。加密增强档（宏观/情绪/新闻）可选 datahub MCP（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`）——**仅加密用，股票不用**。
 - **股票分支**（v1.2.0 数据源唯一化）：
   - **真股：Yahoo Finance 直连**（`https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>`），免凭证、不经 datahub。价/OHLCV/52周/相关性/基本面全部 Yahoo。
   - **股票代币：Bitget 现货直连**（`https://api.bitget.com/api/v2/spot/market/...`），免凭证。**首选 R 系 `RTSLAUSDT`/`RNVDAUSDT`**（流动性高，24h 量千万级）；ON 系 `TSLAONUSDT`/`NVDAONUSDT` 几乎无量、仅备用。裸 `TSLAUSDT`/`NVDAUSDT` 不存在。仅取价/24h量/K线，用于溢价与代币视角。
