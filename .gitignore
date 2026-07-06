@@ -33,7 +33,7 @@ agent-tools/
 .cache/
 .codex/
 .codex-logs/
-.agents/
+# .agents/
 .local_tools/
 outputs/
 .pytest_cache/
