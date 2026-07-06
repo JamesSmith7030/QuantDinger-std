@@ -19,7 +19,9 @@ _PREFIX_TAGS: list[tuple[str, str]] = [
     ("/api/users", "Users"),
     ("/api/indicator", "Indicator"),
     ("/api/market", "Market"),
+    ("/api/market-modules", "Market"),
     ("/api/ai", "AIChat"),
+    ("/api/account", "Account"),
     ("/api/strategies", "Strategy"),
     ("/api/bots", "Strategy"),
     ("/api/credentials", "Credentials"),
@@ -28,7 +30,6 @@ _PREFIX_TAGS: list[tuple[str, str]] = [
     ("/api/portfolio", "Portfolio"),
     ("/api/ibkr", "IBKR"),
     ("/api/alpaca", "Alpaca"),
-    ("/api/mt5", "MT5"),
     ("/api/global-market", "GlobalMarket"),
     ("/api/community", "Community"),
     ("/api/fast-analysis", "FastAnalysis"),
@@ -58,6 +59,7 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.kline import kline_blp
     from app.routes.backtest import backtest_blp
     from app.routes.market import market_blp
+    from app.routes.market_modules import market_modules_blp
     from app.routes.ai_chat import ai_chat_blp
     from app.routes.indicator import indicator_blp
     from app.routes.strategy import strategy_blp
@@ -67,7 +69,6 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.portfolio import portfolio_blp
     from app.routes.ibkr import ibkr_blp
     from app.routes.alpaca import alpaca_blp
-    from app.routes.mt5 import mt5_blp
     from app.routes.global_market import global_market_blp
     from app.routes.community import community_blp
     from app.routes.fast_analysis import fast_analysis_blp
@@ -83,6 +84,7 @@ def register_human_blueprints(api: Api) -> None:
         (kline_blp, "/api/indicator"),
         (backtest_blp, "/api/indicator"),
         (market_blp, "/api/market"),
+        (market_modules_blp, "/api/market-modules"),
         (ai_chat_blp, "/api/ai"),
         (indicator_blp, "/api/indicator"),
         (strategy_blp, "/api"),
@@ -92,7 +94,6 @@ def register_human_blueprints(api: Api) -> None:
         (portfolio_blp, "/api/portfolio"),
         (ibkr_blp, "/api/ibkr"),
         (alpaca_blp, "/api/alpaca"),
-        (mt5_blp, "/api/mt5"),
         (global_market_blp, "/api/global-market"),
         (community_blp, "/api/community"),
         (fast_analysis_blp, "/api/fast-analysis"),

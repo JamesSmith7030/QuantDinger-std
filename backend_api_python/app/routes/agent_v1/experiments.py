@@ -1,12 +1,16 @@
 """Experiment / regime / structured tuning endpoints (class B)."""
 from __future__ import annotations
 
+import time
+
+from app.services.billing_service import get_billing_service
 from app.services.experiment.runner import ExperimentRunnerService
 from app.utils.agent_auth import (
     SCOPE_B, agent_required, current_token, current_user_id, with_idempotency,
 )
 from app.utils.agent_jobs import submit_job
 from app.utils.logger import get_logger
+from flask import request
 
 from . import agent_v1_bp
 from ._helpers import envelope, error, get_json_or_400
@@ -58,6 +62,7 @@ def submit_pipeline():
         kind="experiment_pipeline",
         request_payload=payload,
         runner=_run,
+        idempotency_key=request.headers.get("Idempotency-Key"),
     )
     return envelope(job, message="queued", status=202)
 
@@ -70,14 +75,23 @@ def submit_structured_tune():
     if err:
         return err
 
+    user_id = current_user_id()
+    ok, billing_msg = get_billing_service().check_and_consume(
+        user_id=user_id,
+        feature="ai_tuning",
+        reference_id=f"agent_ai_tuning_{user_id}_{int(time.time())}",
+    )
+    if not ok:
+        return error(402, f"Insufficient credits: {billing_msg}", http=402)
+
     payload = dict(body)
-    payload["__user_id"] = current_user_id()
+    payload["__user_id"] = user_id
 
     def _run(p):
         return _runner.run_structured_tune(user_id=int(p.pop("__user_id", 1)), payload=p)
 
     job = submit_job(
-        user_id=current_user_id(),
+        user_id=user_id,
         agent_token_id=int(current_token().get("id")),
         kind="structured_tune",
         request_payload=payload,

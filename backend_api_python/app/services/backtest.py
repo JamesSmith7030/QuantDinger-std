@@ -5,7 +5,6 @@ import hashlib
 import json
 import math
 import re
-import threading
 import time as _time
 import traceback
 from datetime import datetime, timedelta
@@ -19,48 +18,13 @@ from app.data_sources import DataSourceFactory
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
 from app.utils.risk_guard import trailing_exit_locks_net_profit
+from app.services.backtest_cache import KlineCache
 from app.services.indicator_params import IndicatorParamsParser, IndicatorCaller
 
 logger = get_logger(__name__)
 
 
-class _KlineCache:
-    """Simple in-memory K-line cache with TTL to avoid repeated external API calls."""
-
-    def __init__(self, max_size: int = 64):
-        self._store: Dict[str, Any] = {}
-        self._lock = threading.Lock()
-        self._max_size = max_size
-
-    @staticmethod
-    def _ttl_for_timeframe(timeframe: str) -> int:
-        if timeframe in ('1m', '5m', '15m', '30m'):
-            return 300   # 5 min for intraday
-        return 1800      # 30 min for daily+
-
-    def get(self, key: str) -> Optional[pd.DataFrame]:
-        with self._lock:
-            entry = self._store.get(key)
-            if entry is None:
-                return None
-            if _time.time() > entry['expires']:
-                del self._store[key]
-                return None
-            return entry['df'].copy()
-
-    def put(self, key: str, df: pd.DataFrame, timeframe: str):
-        ttl = self._ttl_for_timeframe(timeframe)
-        with self._lock:
-            if len(self._store) >= self._max_size:
-                oldest_key = min(self._store, key=lambda k: self._store[k]['expires'])
-                del self._store[oldest_key]
-            self._store[key] = {
-                'df': df.copy(),
-                'expires': _time.time() + ttl
-            }
-
-
-_kline_cache = _KlineCache()
+_kline_cache = KlineCache()
 
 
 class BacktestService:
@@ -74,17 +38,17 @@ class BacktestService:
     
     # Multi-timeframe backtest threshold configuration.
     # We pick the finest execution timeframe whose total candle count stays
-    # within ~25k bars — that's the empirical sweet spot where:
+    # within ~25k bars. This is the empirical sweet spot where:
     #   * CCXT paginated fetches stay under ~90 batches (well within budget),
     #   * the simulation loop completes in single-digit seconds,
     #   * the JSON response stays well under the frontend's 10-minute timeout.
     # If the user's date range exceeds the highest tier, we silently fall back
     # to a standard single-timeframe backtest (see `run_multi_timeframe`).
     MTF_CONFIG = {
-        'max_1m_days': 15,         # 1m: 15d × 1440 = 21,600 candles
-        'max_5m_days': 90,         # 5m: 90d × 288 = 25,920 candles (~86 CCXT calls)
-        'max_15m_days': 240,       # 15m: 240d × 96 = 23,040 candles (~77 CCXT calls)
-        'max_30m_days': 540,       # 30m: 540d × 48 = 25,920 candles (~86 CCXT calls)
+        'max_1m_days': 15,         # 1m: 15d x 1440 = 21,600 candles
+        'max_5m_days': 90,         # 5m: 90d x 288 = 25,920 candles (~86 CCXT calls)
+        'max_15m_days': 240,       # 15m: 240d x 96 = 23,040 candles (~77 CCXT calls)
+        'max_30m_days': 540,       # 30m: 540d x 48 = 25,920 candles (~86 CCXT calls)
         'default_exec_tf': '1m',   # Default execution timeframe
         'fallback_exec_tf': '5m',  # Fallback execution timeframe
     }
@@ -168,6 +132,66 @@ class BacktestService:
             else:
                 out[key] = value
         return out
+
+    def _signal_diagnostics(self, signals: Dict[str, Any], trade_direction: str) -> Dict[str, Any]:
+        """Return compact counts for explaining code signals vs execution signals."""
+        def count_series(value: Any) -> int:
+            try:
+                if hasattr(value, "fillna"):
+                    return int(value.fillna(False).astype(bool).sum())
+                return int(bool(value))
+            except Exception:
+                return 0
+
+        raw = {}
+        for key in ("buy", "sell", "open_long", "close_long", "open_short", "close_short"):
+            if key in (signals or {}):
+                raw[key] = count_series(signals.get(key))
+
+        direction = str(trade_direction or "both").lower()
+        if direction not in ("long", "short", "both"):
+            direction = "both"
+
+        normalized = {
+            "open_long": count_series(signals.get("open_long")),
+            "close_long": count_series(signals.get("close_long")),
+            "open_short": count_series(signals.get("open_short")),
+            "close_short": count_series(signals.get("close_short")),
+        }
+        if "buy" in (signals or {}) and "sell" in (signals or {}):
+            buy_count = count_series(signals.get("buy"))
+            sell_count = count_series(signals.get("sell"))
+            if direction == "long":
+                normalized.update({
+                    "open_long": buy_count,
+                    "close_long": sell_count,
+                    "open_short": 0,
+                    "close_short": 0,
+                })
+            elif direction == "short":
+                normalized.update({
+                    "open_long": 0,
+                    "close_long": 0,
+                    "open_short": sell_count,
+                    "close_short": buy_count,
+                })
+            else:
+                normalized.update({
+                    "open_long": buy_count,
+                    "close_long": 0,
+                    "open_short": sell_count,
+                    "close_short": 0,
+                })
+
+        entry_signals = normalized["open_long"] + normalized["open_short"]
+        exit_signals = normalized["close_long"] + normalized["close_short"]
+        return {
+            "raw": raw,
+            "normalized": normalized,
+            "tradeDirection": direction,
+            "entrySignals": entry_signals,
+            "exitSignals": exit_signals,
+        }
 
     def _attach_warmup_to_result(
         self,
@@ -273,7 +297,7 @@ class BacktestService:
 
         Strategy: pick the finest exec timeframe whose total candle count stays
         below ~25k bars. Longer windows degrade to coarser exec candles instead
-        of failing — so users still get *some* intra-bar precision over a 6+
+        of failing, so users still get *some* intra-bar precision over a 6+
         month range, just not 1-minute precision.
 
         Args:
@@ -600,6 +624,8 @@ class BacktestService:
         indicator_params: Optional[Dict[str, Any]] = None,
         user_id: int = 1,
         indicator_id: Optional[int] = None,
+        market_type: Optional[str] = None,
+        exchange_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Multi-timeframe backtest.
@@ -684,6 +710,8 @@ class BacktestService:
                 indicator_params=indicator_params,
                 user_id=user_id,
                 indicator_id=indicator_id,
+                market_type=market_type,
+                exchange_id=exchange_id,
             )
             result['precision_info'] = precision_info or {
                 'enabled': False,
@@ -714,7 +742,15 @@ class BacktestService:
         )
         
         # 1. Fetch strategy timeframe candles (for signal generation)
-        df_signal_full = self._fetch_kline_data(market, symbol, timeframe, signal_start_date, end_date)
+        df_signal_full = self._fetch_kline_data(
+            market,
+            symbol,
+            timeframe,
+            signal_start_date,
+            end_date,
+            market_type=market_type,
+            exchange_id=exchange_id,
+        )
         if df_signal_full.empty:
             raise ValueError("No candle data available in the backtest date range")
         
@@ -733,11 +769,20 @@ class BacktestService:
         if df_signal.empty:
             raise ValueError("No candle data available in the backtest date range")
         signals = self._slice_signals_to_window(signals_full, df_signal.index)
+        signal_diagnostics = self._signal_diagnostics(signals, trade_direction)
         logger.info(f"Signals generated: {list(signals.keys()) if isinstance(signals, dict) else type(signals)}")
         
         # 3. Fetch execution timeframe candles (for precise trade simulation)
         logger.info(f"Fetching execution timeframe data: {exec_tf} for {market}:{symbol}")
-        df_exec = self._fetch_kline_data(market, symbol, exec_tf, start_date, end_date)
+        df_exec = self._fetch_kline_data(
+            market,
+            symbol,
+            exec_tf,
+            start_date,
+            end_date,
+            market_type=market_type,
+            exchange_id=exchange_id,
+        )
         logger.info(f"Execution timeframe data fetched: {len(df_exec)} candles")
         if df_exec.empty:
             logger.warning(f"Cannot fetch {exec_tf} candles, falling back to standard backtest")
@@ -757,6 +802,8 @@ class BacktestService:
                 indicator_params=indicator_params,
                 user_id=user_id,
                 indicator_id=indicator_id,
+                market_type=market_type,
+                exchange_id=exchange_id,
             )
             result['precision_info'] = {
                 'enabled': False,
@@ -816,6 +863,7 @@ class BacktestService:
         try:
             logger.info("Formatting backtest result...")
             result = self._format_result(metrics, equity_curve, trades)
+            result['signalDiagnostics'] = signal_diagnostics
             result['precision_info'] = precision_info
             result['execution_timeframe'] = exec_tf
             result['signal_candles'] = len(df_signal)
@@ -838,6 +886,7 @@ class BacktestService:
                 warmup_start=signal_start_date,
                 requested_start=start_date,
             )
+            self._attach_buy_hold_benchmark(result, df_exec, initial_capital, symbol)
             self._attach_actual_range_to_result(result, df_signal)
             logger.info("Backtest result formatted successfully")
         except Exception as e:
@@ -905,7 +954,7 @@ class BacktestService:
         # parsing done in `run_multi_timeframe`/`run`/`run_strategy_script`. It's
         # used at the tail of this function by `_annotate_signal_bar_times` to
         # align each trade with the originating signal candle on the chart.
-        # Historically this was an unbound name here — any successful MTF run
+        # Historically this was an unbound name here, so any successful MTF run
         # would raise `NameError: name 'signal_timing' is not defined` at the
         # very last step, masking otherwise-correct results.
         exec_cfg = cfg.get('execution') or {}
@@ -944,7 +993,7 @@ class BacktestService:
         total_funding_paid = 0.0
 
         # Risk percentages are the underlying's % price move directly.
-        # Leverage only affects PnL magnitude and liquidation — it does NOT
+        # Leverage only affects PnL magnitude and liquidation; it does NOT
         # scale trigger thresholds.
         stop_loss_pct_eff = stop_loss_pct if stop_loss_pct > 0 else 0
         take_profit_pct_eff = take_profit_pct if take_profit_pct > 0 else 0
@@ -1056,8 +1105,8 @@ class BacktestService:
         logger.info(f"Signal timeframe: {signal_timeframe} ({signal_tf_seconds}s), Exec timeframe: {exec_timeframe} ({exec_tf_seconds}s)")
         
         # Preprocessing: create signal queue sorted by effective time.
-        # next_bar_open → first exec-bar open after signal bar closes.
-        # same_bar_close → last exec-bar close within the signal bar.
+        # next_bar_open -> first exec-bar open after signal bar closes.
+        # same_bar_close -> last exec-bar close within the signal bar.
         logger.info(
             f"Initializing signal queue (fill_mode={signal_fill_mode}, signal_timing={signal_timing})..."
         )
@@ -1191,11 +1240,10 @@ class BacktestService:
             if i > 0 and i % progress_log_interval == 0:
                 progress_pct = (i / total_exec_candles) * 100
                 logger.info(f"Execution progress: {i}/{total_exec_candles} ({progress_pct:.1f}%), trades={executed_trades_count}, position={position}")
-            # 爆仓后直接停止回测，输出结果
             if is_liquidated:
                 break
 
-            # Funding fee accrual — runs once per bar, BEFORE signal/SL processing
+            # Funding fee accrual runs once per bar, BEFORE signal/SL processing
             # so trades that close on this bar still pay one period of carry.
             # We charge for every funding boundary that falls within
             # [bar_open_ts, bar_open_ts + exec_tf). Multiple boundaries per bar
@@ -1230,7 +1278,7 @@ class BacktestService:
 
             # bar_time: floor of execution timestamp to signal timeframe.
             # This is the chart-bar that the front-end displays and is used to
-            # anchor buy/sell overlays — prevents sub-bar offset when exec_tf
+            # anchor buy/sell overlays, preventing sub-bar offset when exec_tf
             # is finer than signal_tf (e.g. 1m execution on a 1h chart).
             try:
                 bar_time_str = timestamp.floor(f'{signal_tf_seconds}s').strftime('%Y-%m-%d %H:%M')
@@ -1592,7 +1640,6 @@ class BacktestService:
                             executed_trades_count += 1
                             if executed_trades_count <= 10:
                                 logger.info(f"Trade #{executed_trades_count}: close_short (before open_long) @ {timestamp}, price={close_price:.4f}, profit={close_profit:.2f}")
-                            # 检查是否爆仓
                             if capital < min_capital_to_trade:
                                 is_liquidated = True
                                 capital = 0
@@ -1651,7 +1698,6 @@ class BacktestService:
                         highest_since_entry = None
                         lowest_since_entry = None
                         pending_signal = None
-                        # 检查是否爆仓
                         if capital < min_capital_to_trade:
                             is_liquidated = True
                             capital = 0
@@ -1683,7 +1729,6 @@ class BacktestService:
                             executed_trades_count += 1
                             if executed_trades_count <= 10:
                                 logger.info(f"Trade #{executed_trades_count}: close_long (before open_short) @ {timestamp}, price={close_price:.4f}, profit={close_profit:.2f}")
-                            # 检查是否爆仓
                             if capital < min_capital_to_trade:
                                 is_liquidated = True
                                 capital = 0
@@ -1743,7 +1788,6 @@ class BacktestService:
                         highest_since_entry = None
                         lowest_since_entry = None
                         pending_signal = None
-                        # 检查是否爆仓
                         if capital < min_capital_to_trade:
                             is_liquidated = True
                             capital = 0
@@ -1812,6 +1856,10 @@ class BacktestService:
         indicator_id = snapshot.get('indicator_id')
         user_id = int(snapshot.get('user_id') or 1)
         run_type = str(snapshot.get('run_type') or 'strategy_indicator')
+        config_snapshot = snapshot.get('config_snapshot') if isinstance(snapshot.get('config_snapshot'), dict) else {}
+        market_config = config_snapshot.get('marketConfig') if isinstance(config_snapshot.get('marketConfig'), dict) else {}
+        market_type = snapshot.get('market_type') or market_config.get('marketType')
+        exchange_id = snapshot.get('exchange_id') or market_config.get('exchangeId')
 
         if run_type == 'strategy_script':
             return self._run_script_strategy(
@@ -1827,6 +1875,8 @@ class BacktestService:
                 leverage=leverage,
                 trade_direction=trade_direction,
                 strategy_config=strategy_config,
+                market_type=market_type,
+                exchange_id=exchange_id,
             )
 
         strict_mode = bool(snapshot.get('strict_mode', True))
@@ -1847,6 +1897,8 @@ class BacktestService:
             indicator_params=indicator_params,
             user_id=user_id,
             indicator_id=indicator_id,
+            market_type=market_type,
+            exchange_id=exchange_id,
         )
 
     def _run_script_strategy(
@@ -1864,8 +1916,18 @@ class BacktestService:
         leverage: int,
         trade_direction: str,
         strategy_config: Optional[Dict[str, Any]] = None,
+        market_type: Optional[str] = None,
+        exchange_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        df = self._fetch_kline_data(market, symbol, timeframe, start_date, end_date)
+        df = self._fetch_kline_data(
+            market,
+            symbol,
+            timeframe,
+            start_date,
+            end_date,
+            market_type=market_type,
+            exchange_id=exchange_id,
+        )
         if df.empty:
             raise ValueError("No candle data available in the backtest date range")
 
@@ -1899,7 +1961,12 @@ class BacktestService:
         ea['strictMode'] = False
         ea['simulationMode'] = 'script_standard'
         ea['fillRule'] = 'next_bar_open'
+        if market_type:
+            ea['marketType'] = market_type
+        if exchange_id:
+            ea['exchangeId'] = exchange_id
         result['executionAssumptions'] = ea
+        self._attach_buy_hold_benchmark(result, df, initial_capital, symbol)
         self._attach_actual_range_to_result(result, df)
         return result
     
@@ -1974,10 +2041,12 @@ class BacktestService:
         indicator_params: Optional[Dict[str, Any]] = None,
         user_id: int = 1,
         indicator_id: Optional[int] = None,
+        market_type: Optional[str] = None,
+        exchange_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Live-aligned backtest: strict → closed-bar signals + next-bar open;
-        non-strict → same-bar signals + 1m execution path (crypto).
+        Live-aligned backtest: strict -> closed-bar signals + next-bar open;
+        non-strict -> same-bar signals + 1m execution path (crypto).
         """
         from app.services.backtest_execution import (
             merge_strict_mode_into_strategy_config,
@@ -2004,6 +2073,8 @@ class BacktestService:
                 indicator_params=indicator_params,
                 user_id=user_id,
                 indicator_id=indicator_id,
+                market_type=market_type,
+                exchange_id=exchange_id,
             )
             result['precision_info'] = precision_info_for_run(
                 strict_mode=True, strategy_timeframe=timeframe,
@@ -2036,6 +2107,8 @@ class BacktestService:
                 indicator_params=indicator_params,
                 user_id=user_id,
                 indicator_id=indicator_id,
+                market_type=market_type,
+                exchange_id=exchange_id,
             )
             pi_raw = result.get('precision_info') or {}
             mtf_active = bool(pi_raw.get('enabled'))
@@ -2076,6 +2149,8 @@ class BacktestService:
             indicator_params=indicator_params,
             user_id=user_id,
             indicator_id=indicator_id,
+            market_type=market_type,
+            exchange_id=exchange_id,
         )
         result['precision_info'] = precision_info_for_run(
             strict_mode=False,
@@ -2111,6 +2186,8 @@ class BacktestService:
         indicator_params: Optional[Dict[str, Any]] = None,
         user_id: int = 1,
         indicator_id: Optional[int] = None,
+        market_type: Optional[str] = None,
+        exchange_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run backtest.
@@ -2135,7 +2212,15 @@ class BacktestService:
 
         # 1. Fetch candle data. Indicators execute on warmup+window data, while
         # trading starts strictly at the user-requested start_date.
-        df_full = self._fetch_kline_data(market, symbol, timeframe, signal_start_date, end_date)
+        df_full = self._fetch_kline_data(
+            market,
+            symbol,
+            timeframe,
+            signal_start_date,
+            end_date,
+            market_type=market_type,
+            exchange_id=exchange_id,
+        )
         if df_full.empty:
             raise ValueError("No candle data available in the backtest date range")
         
@@ -2155,6 +2240,7 @@ class BacktestService:
         if df.empty:
             raise ValueError("No candle data available in the backtest date range")
         signals = self._slice_signals_to_window(signals_full, df.index)
+        signal_diagnostics = self._signal_diagnostics(signals, trade_direction)
         
         # 3. Simulate trading
         equity_curve, trades, total_commission = self._simulate_trading(
@@ -2174,23 +2260,29 @@ class BacktestService:
         
         # 5. Format result
         result = self._format_result(metrics, equity_curve, trades)
+        result['signalDiagnostics'] = signal_diagnostics
         result['executionAssumptions'] = self._execution_assumptions(
             strategy_config,
             simulation_mode='standard',
             signal_timeframe=timeframe,
         )
+        if market_type:
+            result['executionAssumptions']['marketType'] = market_type
+        if exchange_id:
+            result['executionAssumptions']['exchangeId'] = exchange_id
         self._attach_warmup_to_result(
             result,
             warmup_bars=warmup_bars,
             warmup_start=signal_start_date,
             requested_start=start_date,
         )
+        self._attach_buy_hold_benchmark(result, df, initial_capital, symbol)
         self._attach_actual_range_to_result(result, df)
         return result
     
     @staticmethod
     def _attach_actual_range_to_result(result: Dict[str, Any], df: pd.DataFrame) -> None:
-        """因上游 K 线不足而缩短区间时，写入 executionAssumptions（供前端展示，非错误）。"""
+        """Attach actual data range when the requested window was shortened."""
         attrs = getattr(df, "attrs", None) or {}
         ar = attrs.get("backtestActualRange")
         if not ar:
@@ -2199,6 +2291,115 @@ class BacktestService:
         ea["actualDataRange"] = ar
         ea["requestedRangeAdjusted"] = True
         result["executionAssumptions"] = ea
+
+    @staticmethod
+    def _parse_curve_time(raw: Any) -> Optional[pd.Timestamp]:
+        if raw is None:
+            return None
+        try:
+            ts = pd.to_datetime(raw)
+            if pd.isna(ts):
+                return None
+            if getattr(ts, "tzinfo", None) is not None:
+                ts = ts.tz_convert(None)
+            return ts
+        except Exception:
+            return None
+
+    def _build_buy_hold_benchmark_curve(
+        self,
+        df: pd.DataFrame,
+        equity_curve: List[Dict[str, Any]],
+        initial_capital: float,
+    ) -> Dict[str, Any]:
+        """Build a same-period spot buy-and-hold benchmark aligned to equity points."""
+        if df is None or df.empty or not equity_curve or "close" not in df.columns:
+            return {}
+        try:
+            closes = df["close"].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        except Exception:
+            return {}
+        closes = closes[closes > 0]
+        if closes.empty:
+            return {}
+
+        close_index = pd.to_datetime(closes.index)
+        try:
+            if getattr(close_index, "tz", None) is not None:
+                close_index = close_index.tz_convert(None)
+        except Exception:
+            pass
+        close_series = pd.Series(closes.to_numpy(dtype=float), index=close_index).sort_index()
+        if close_series.empty:
+            return {}
+
+        base_price = float(close_series.iloc[0])
+        if not math.isfinite(base_price) or base_price <= 0:
+            return {}
+
+        curve: List[Dict[str, Any]] = []
+        last_price = base_price
+        for point in equity_curve:
+            ts = self._parse_curve_time((point or {}).get("time"))
+            if ts is not None:
+                pos = close_series.index.searchsorted(ts, side="right") - 1
+                if pos < 0:
+                    pos = 0
+                try:
+                    candidate = float(close_series.iloc[pos])
+                    if math.isfinite(candidate) and candidate > 0:
+                        last_price = candidate
+                except Exception:
+                    pass
+            value = float(initial_capital or 0) * last_price / base_price
+            curve.append({
+                "time": (point or {}).get("time", ""),
+                "value": round(value, 2),
+                "price": round(last_price, 8),
+            })
+
+        if not curve:
+            return {}
+        initial = float(initial_capital or 0)
+        final_value = float(curve[-1]["value"])
+        benchmark_return = ((final_value - initial) / initial * 100) if initial > 0 else 0.0
+        return {
+            "benchmarkCurve": curve,
+            "benchmarkReturn": round(benchmark_return, 2),
+            "benchmarkFinalValue": round(final_value, 2),
+            "benchmarkStartPrice": round(base_price, 8),
+            "benchmarkEndPrice": round(last_price, 8),
+        }
+
+    def _attach_buy_hold_benchmark(
+        self,
+        result: Dict[str, Any],
+        df: pd.DataFrame,
+        initial_capital: float,
+        symbol: str = "",
+    ) -> None:
+        benchmark = self._build_buy_hold_benchmark_curve(
+            df,
+            result.get("equityCurve") or [],
+            initial_capital,
+        )
+        if not benchmark:
+            return
+        result.update(benchmark)
+        try:
+            total_return = float(result.get("totalReturn") or 0)
+            result["alphaReturn"] = round(total_return - float(benchmark.get("benchmarkReturn") or 0), 2)
+        except Exception:
+            pass
+        result["benchmark"] = {
+            "type": "buy_hold_spot",
+            "label": "Spot buy-and-hold",
+            "symbol": symbol or "",
+            "return": result.get("benchmarkReturn"),
+            "finalValue": result.get("benchmarkFinalValue"),
+            "startPrice": result.get("benchmarkStartPrice"),
+            "endPrice": result.get("benchmarkEndPrice"),
+        }
     
     def _fetch_kline_data(
         self,
@@ -2206,7 +2407,9 @@ class BacktestService:
         symbol: str,
         timeframe: str,
         start_date: datetime,
-        end_date: datetime
+        end_date: datetime,
+        market_type: Optional[str] = None,
+        exchange_id: Optional[str] = None,
     ) -> pd.DataFrame:
         """Fetch candle data and convert to DataFrame (with in-memory caching)"""
         # Calculate required candle count (+ slack for 2y-class windows & upstream gaps)
@@ -2221,7 +2424,9 @@ class BacktestService:
         # Calculate before_time (end date + 1 day)
         before_time = int((end_date + timedelta(days=1)).timestamp())
 
-        cache_key = f"{market}:{symbol}:{timeframe}:{start_date.date()}:{end_date.date()}"
+        mt_key = str(market_type or "").strip().lower()
+        ex_key = str(exchange_id or "").strip().lower()
+        cache_key = f"{market}:{symbol}:{timeframe}:{mt_key}:{ex_key}:{start_date.date()}:{end_date.date()}"
         cached = _kline_cache.get(cache_key)
         if cached is not None and not cached.empty:
             logger.info(f"K-line cache HIT for {cache_key} ({len(cached)} candles)")
@@ -2229,7 +2434,7 @@ class BacktestService:
         
         # Fetch data. We deliberately swallow any upstream exception (CCXT
         # network/rate-limit errors, yfinance hiccups, etc.) and return an empty
-        # DataFrame instead — the MTF entry point then falls back to a standard
+        # DataFrame instead, so the MTF entry point then falls back to a standard
         # backtest with a clear `mtfFallbackReason='data_unavailable'`, which is
         # far friendlier than bubbling up a 500.
         try:
@@ -2240,6 +2445,8 @@ class BacktestService:
                 limit=limit,
                 before_time=before_time,
                 after_time=after_time,
+                exchange_id=exchange_id,
+                market_type=market_type,
             )
         except Exception as exc:
             logger.warning(
@@ -2294,7 +2501,6 @@ class BacktestService:
                     f"requested=[{start_date} ~ {end_date}], upstream=[{data_start} ~ {data_end}]"
                 )
 
-            # 首选：请求区间与可用数据的交集（例如不满2年时自动从首根可用K开始）
             rs = pd.Timestamp(start_date)
             re = pd.Timestamp(end_date)
             effective_start = max(rs, pd.Timestamp(data_start))
@@ -2304,7 +2510,6 @@ class BacktestService:
             if effective_start <= effective_end:
                 df_filtered = df[(df.index >= effective_start) & (df.index <= effective_end)].copy()
             else:
-                # 无交集：从第一根可用 K 回测到「用户结束日」与「数据末」的较早者，不视为错误
                 alt_start = pd.Timestamp(data_start)
                 alt_end = min(re, pd.Timestamp(data_end))
                 if alt_start <= alt_end:
@@ -2312,7 +2517,7 @@ class BacktestService:
                     effective_start, effective_end = alt_start, alt_end
                     window_adjusted = True
                     logger.info(
-                        f"[Backtest] 可用K线未覆盖所选起点，已从首根可用K线开始回测 "
+                        f"[Backtest] Available K-lines do not cover the requested start; using first available candle. "
                         f"{market}:{symbol} {timeframe} effective=[{effective_start} ~ {effective_end}]"
                     )
                 elif len(df) > 0:
@@ -2321,7 +2526,7 @@ class BacktestService:
                     effective_end = df_filtered.index.max()
                     window_adjusted = True
                     logger.info(
-                        f"[Backtest] 所选区间与可用数据无重叠，使用全部可用K线 "
+                        f"[Backtest] Requested window does not overlap available data; using all available candles. "
                         f"{market}:{symbol} {timeframe} [{effective_start} ~ {effective_end}]"
                     )
                 else:
@@ -2337,7 +2542,6 @@ class BacktestService:
             coverage_ratio = covered_seconds / requested_seconds if requested_seconds > 0 else 0.0
 
             if df_filtered.empty:
-                # Last-resort：取最近 N 根（上游时间戳异常等），仅记 debug，不对用户报错
                 requested_candles = max(1, math.ceil(requested_seconds / tf_seconds))
                 if len(df) > 0:
                     df_filtered = df.tail(min(len(df), requested_candles)).copy()
@@ -2345,12 +2549,12 @@ class BacktestService:
                     effective_end = df_filtered.index.max()
                     used_fallback = True
                     logger.debug(
-                        f"[Backtest] 过滤后为空，已回退为最近 {len(df_filtered)} 根K线 "
+                        f"[Backtest] Filtered window is empty; falling back to latest {len(df_filtered)} candles. "
                         f"{market}:{symbol} {timeframe} ({effective_start} ~ {effective_end})"
                     )
                 else:
                     logger.debug(
-                        f"[Backtest] 过滤后无K线 {market}:{symbol} {timeframe} "
+                        f"[Backtest] Filtered window has no K-lines: {market}:{symbol} {timeframe} "
                         f"upstream={data_start}~{data_end}"
                     )
                     return pd.DataFrame()
@@ -2389,7 +2593,7 @@ class BacktestService:
         # Supported indicator signal formats:
         # - Preferred (simple): df['buy'], df['sell'] as boolean
         # - Backtest/internal (4-way): df['open_long'], df['close_long'], df['open_short'], df['close_short'] as boolean
-        signals = pd.Series(0, index=df.index)
+        signals = {}
         
         try:
             # Reset DatetimeIndex to integer so user code can use df.at[0, ...] or df.iloc[0, ...]
@@ -2419,16 +2623,11 @@ class BacktestService:
                 local_vars['commission'] = backtest_params.get('commission', 0.0002)
                 local_vars['trade_direction'] = backtest_params.get('trade_direction', 'both')
             
-            # === 指标参数支持 ===
-            # 从 backtest_params 获取用户设置的指标参数
             user_indicator_params = (backtest_params or {}).get('indicator_params', {})
-            # 解析指标代码中声明的参数
             declared_params = IndicatorParamsParser.parse_params(code)
-            # 合并参数（用户值优先，否则使用默认值）
             merged_params = IndicatorParamsParser.merge_params(declared_params, user_indicator_params)
             local_vars['params'] = merged_params
             
-            # === 指标调用器支持 ===
             user_id = (backtest_params or {}).get('user_id', 1)
             indicator_id = (backtest_params or {}).get('indicator_id')
             indicator_caller = IndicatorCaller(user_id, indicator_id)
@@ -2518,6 +2717,7 @@ class BacktestService:
         except Exception as e:
             logger.error(f"Indicator code execution error: {e}")
             logger.error(traceback.format_exc())
+            raise
         
         return signals
 
@@ -2536,6 +2736,18 @@ class BacktestService:
         close_short = pd.Series(False, index=df.index)
         add_long = pd.Series(False, index=df.index)
         add_short = pd.Series(False, index=df.index)
+        open_long_quote_amount = pd.Series(0.0, index=df.index)
+        open_short_quote_amount = pd.Series(0.0, index=df.index)
+        add_long_quote_amount = pd.Series(0.0, index=df.index)
+        add_short_quote_amount = pd.Series(0.0, index=df.index)
+        open_long_base_qty = pd.Series(0.0, index=df.index)
+        open_short_base_qty = pd.Series(0.0, index=df.index)
+        add_long_base_qty = pd.Series(0.0, index=df.index)
+        add_short_base_qty = pd.Series(0.0, index=df.index)
+        open_long_price = pd.Series(0.0, index=df.index)
+        open_short_price = pd.Series(0.0, index=df.index)
+        add_long_price = pd.Series(0.0, index=df.index)
+        add_short_price = pd.Series(0.0, index=df.index)
 
         # Share the live-trading hedge-aware ctx implementation so the two
         # paths can't drift apart (P0-1, May 2026). ScriptBar is still needed
@@ -2549,7 +2761,21 @@ class BacktestService:
         try:
             from app.utils.safe_exec import build_safe_builtins, safe_exec_with_validation
 
+            strategy_config = runtime.get('strategy_config') if isinstance(runtime.get('strategy_config'), dict) else {}
             ctx = ScriptBacktestContext(df_exec, float(runtime.get('initial_capital') or 10000))
+            runtime_config = {
+                **strategy_config,
+                'initial_capital': runtime.get('initial_capital') or 10000,
+                'investment_amount': runtime.get('investment_amount') or runtime.get('initial_capital') or 10000,
+                'leverage': runtime.get('leverage') or 1.0,
+                'trade_direction': runtime.get('trade_direction') or 'long',
+            }
+            ctx.set_runtime_config(runtime_config, initial_balance=float(runtime.get('initial_capital') or 10000))
+            template_params = strategy_config.get('script_template_params') or {}
+            if isinstance(template_params, dict):
+                ctx._params = {**ctx._params, **template_params}
+            if ctx.direction in ('long', 'short', 'both'):
+                ctx._params['direction'] = ctx.direction
             exec_env = {
                 '__builtins__': build_safe_builtins(),
                 'np': np,
@@ -2575,6 +2801,44 @@ class BacktestService:
             trade_direction = str(runtime.get('trade_direction') or 'both').lower()
             if trade_direction not in ('long', 'short', 'both'):
                 trade_direction = 'both'
+            leverage = float(runtime.get('leverage') or 1.0)
+            market_type = str((runtime.get('strategy_config') or {}).get('market_type') or '').strip().lower()
+            qty_leverage = 1.0 if market_type == 'spot' else max(1.0, leverage)
+
+            def _positive_float(value: Any) -> float:
+                try:
+                    out = float(value or 0.0)
+                    return out if out > 0 else 0.0
+                except Exception:
+                    return 0.0
+
+            def _order_sizing(order: Dict[str, Any], ref_price: float) -> tuple[float, float, float]:
+                quote = _positive_float(order.get('script_quote_amount'))
+                base_qty = _positive_float(order.get('script_base_qty'))
+                raw_amount = _positive_float(order.get('amount'))
+                if quote > 0 and ref_price > 0:
+                    return quote * qty_leverage / ref_price, quote, 0.0
+                if base_qty > 0:
+                    return base_qty, 0.0, base_qty
+                return raw_amount, 0.0, raw_amount
+
+            def _set_sizing(prefix: str, idx: int, price: float, quote: float, base_qty: float) -> None:
+                if prefix == 'open_long':
+                    open_long_price.iloc[idx] = price
+                    open_long_quote_amount.iloc[idx] = quote
+                    open_long_base_qty.iloc[idx] = base_qty
+                elif prefix == 'open_short':
+                    open_short_price.iloc[idx] = price
+                    open_short_quote_amount.iloc[idx] = quote
+                    open_short_base_qty.iloc[idx] = base_qty
+                elif prefix == 'add_long':
+                    add_long_price.iloc[idx] = price
+                    add_long_quote_amount.iloc[idx] = quote
+                    add_long_base_qty.iloc[idx] = base_qty
+                elif prefix == 'add_short':
+                    add_short_price.iloc[idx] = price
+                    add_short_quote_amount.iloc[idx] = quote
+                    add_short_base_qty.iloc[idx] = base_qty
 
             for i, row in df_exec.iterrows():
                 ctx.current_index = int(i)
@@ -2593,7 +2857,7 @@ class BacktestService:
                     action = str(order.get('action') or '').lower()
                     intent = str(order.get('intent') or 'auto').lower()
                     order_price = float(order.get('price') or bar['close'] or 0)
-                    order_amount = float(order.get('amount') or 0)
+                    order_amount, order_quote, order_base_qty = _order_sizing(order, order_price)
 
                     if action == 'close':
                         if ctx.position.has_long():
@@ -2604,7 +2868,7 @@ class BacktestService:
                             ctx.position.close_short()
                         continue
 
-                    # Explicit hedge intents — ctx.close_long / close_short /
+                    # Explicit hedge intents from ctx.close_long / close_short /
                     # open_long / open_short. Keep both legs independent.
                     if intent == 'close_long':
                         if ctx.position.has_long():
@@ -2620,16 +2884,20 @@ class BacktestService:
                         if trade_direction in ('long', 'both'):
                             if ctx.position.has_long():
                                 add_long.iloc[i] = True
+                                _set_sizing('add_long', i, order_price, order_quote, order_base_qty)
                             else:
                                 open_long.iloc[i] = True
+                                _set_sizing('open_long', i, order_price, order_quote, order_base_qty)
                             ctx.position.open_long(order_price, order_amount)
                         continue
                     if intent == 'open_short':
                         if trade_direction in ('short', 'both'):
                             if ctx.position.has_short():
                                 add_short.iloc[i] = True
+                                _set_sizing('add_short', i, order_price, order_quote, order_base_qty)
                             else:
                                 open_short.iloc[i] = True
+                                _set_sizing('open_short', i, order_price, order_quote, order_base_qty)
                             ctx.position.open_short(order_price, order_amount)
                         continue
 
@@ -2641,8 +2909,10 @@ class BacktestService:
                         if trade_direction in ('long', 'both'):
                             if ctx.position.has_long():
                                 add_long.iloc[i] = True
+                                _set_sizing('add_long', i, order_price, order_quote, order_base_qty)
                             else:
                                 open_long.iloc[i] = True
+                                _set_sizing('open_long', i, order_price, order_quote, order_base_qty)
                             ctx.position.open_long(order_price, order_amount)
                         continue
 
@@ -2653,8 +2923,10 @@ class BacktestService:
                         if trade_direction in ('short', 'both'):
                             if ctx.position.has_short():
                                 add_short.iloc[i] = True
+                                _set_sizing('add_short', i, order_price, order_quote, order_base_qty)
                             else:
                                 open_short.iloc[i] = True
+                                _set_sizing('open_short', i, order_price, order_quote, order_base_qty)
                             ctx.position.open_short(order_price, order_amount)
 
             return {
@@ -2664,6 +2936,18 @@ class BacktestService:
                 'close_short': close_short,
                 'add_long': add_long,
                 'add_short': add_short,
+                'open_long_quote_amount': open_long_quote_amount,
+                'open_short_quote_amount': open_short_quote_amount,
+                'add_long_quote_amount': add_long_quote_amount,
+                'add_short_quote_amount': add_short_quote_amount,
+                'open_long_base_qty': open_long_base_qty,
+                'open_short_base_qty': open_short_base_qty,
+                'add_long_base_qty': add_long_base_qty,
+                'add_short_base_qty': add_short_base_qty,
+                'open_long_price': open_long_price,
+                'open_short_price': open_short_price,
+                'add_long_price': add_long_price,
+                'add_short_price': add_short_price,
                 'logs': ctx.flush_logs(),
             }
         except Exception as e:
@@ -2951,6 +3235,11 @@ class BacktestService:
             close_long_arr = np.insert(close_long_arr[:-1], 0, False)
             open_short_arr = np.insert(open_short_arr[:-1], 0, False)
             close_short_arr = np.insert(close_short_arr[:-1], 0, False)
+            def _shift_float_arr(arr):
+                return np.insert(arr[:-1], 0, 0.0)
+        else:
+            def _shift_float_arr(arr):
+                return arr
         
         # Filter signals by trade direction
         if trade_direction == 'long':
@@ -2969,27 +3258,70 @@ class BacktestService:
             add_long_arr = signals['add_long'].values
             add_short_arr = signals['add_short'].values
             position_size_arr = signals.get('position_size', pd.Series([0.0] * len(df))).values
+            if signal_timing in ['next_bar_open', 'next_open', 'nextopen', 'next']:
+                add_long_arr = np.insert(add_long_arr[:-1], 0, False)
+                add_short_arr = np.insert(add_short_arr[:-1], 0, False)
+                position_size_arr = _shift_float_arr(position_size_arr)
             
             # Filter add signals by trade direction
             if trade_direction == 'long':
                 add_short_arr = np.zeros(len(df), dtype=bool)
             elif trade_direction == 'short':
                 add_long_arr = np.zeros(len(df), dtype=bool)
+        else:
+            position_size_arr = np.zeros(len(df), dtype=float)
         
         # Entry trigger price (if indicator provides)
-        open_long_price_arr = signals.get('open_long_price', pd.Series([0.0] * len(df))).values
-        open_short_price_arr = signals.get('open_short_price', pd.Series([0.0] * len(df))).values
+        open_long_price_arr = _shift_float_arr(signals.get('open_long_price', pd.Series([0.0] * len(df))).values)
+        open_short_price_arr = _shift_float_arr(signals.get('open_short_price', pd.Series([0.0] * len(df))).values)
         
         # Exit target price (if indicator provides)
-        close_long_price_arr = signals.get('close_long_price', pd.Series([0.0] * len(df))).values
-        close_short_price_arr = signals.get('close_short_price', pd.Series([0.0] * len(df))).values
+        close_long_price_arr = _shift_float_arr(signals.get('close_long_price', pd.Series([0.0] * len(df))).values)
+        close_short_price_arr = _shift_float_arr(signals.get('close_short_price', pd.Series([0.0] * len(df))).values)
         
         # Add position price (if indicator provides)
-        add_long_price_arr = signals.get('add_long_price', pd.Series([0.0] * len(df))).values
-        add_short_price_arr = signals.get('add_short_price', pd.Series([0.0] * len(df))).values
+        add_long_price_arr = _shift_float_arr(signals.get('add_long_price', pd.Series([0.0] * len(df))).values)
+        add_short_price_arr = _shift_float_arr(signals.get('add_short_price', pd.Series([0.0] * len(df))).values)
+
+        open_long_quote_arr = _shift_float_arr(signals.get('open_long_quote_amount', pd.Series([0.0] * len(df))).values)
+        open_short_quote_arr = _shift_float_arr(signals.get('open_short_quote_amount', pd.Series([0.0] * len(df))).values)
+        add_long_quote_arr = _shift_float_arr(signals.get('add_long_quote_amount', pd.Series([0.0] * len(df))).values)
+        add_short_quote_arr = _shift_float_arr(signals.get('add_short_quote_amount', pd.Series([0.0] * len(df))).values)
+        open_long_base_qty_arr = _shift_float_arr(signals.get('open_long_base_qty', pd.Series([0.0] * len(df))).values)
+        open_short_base_qty_arr = _shift_float_arr(signals.get('open_short_base_qty', pd.Series([0.0] * len(df))).values)
+        add_long_base_qty_arr = _shift_float_arr(signals.get('add_long_base_qty', pd.Series([0.0] * len(df))).values)
+        add_short_base_qty_arr = _shift_float_arr(signals.get('add_short_base_qty', pd.Series([0.0] * len(df))).values)
+
+        market_type_cfg = str((cfg.get('market_type') or cfg.get('marketType') or '')).strip().lower()
+        sizing_leverage = 1.0 if market_type_cfg == 'spot' else max(1.0, float(leverage or 1))
+
+        def _shares_from_explicit_or_pct(
+            *,
+            exec_price: float,
+            capital_now: float,
+            quote_amount: float = 0.0,
+            base_qty: float = 0.0,
+            fallback_pct: Optional[float] = None,
+            fallback_full: bool = True,
+        ) -> float:
+            try:
+                if float(base_qty or 0.0) > 0:
+                    return float(base_qty)
+            except Exception:
+                pass
+            try:
+                if float(quote_amount or 0.0) > 0 and exec_price > 0:
+                    return (float(quote_amount) * sizing_leverage) / float(exec_price)
+            except Exception:
+                pass
+            position_pct = fallback_pct
+            if position_pct is not None and position_pct > 0 and position_pct < 1:
+                return (float(capital_now) * position_pct * float(leverage or 1)) / float(exec_price)
+            if fallback_full:
+                return (float(capital_now) * float(leverage or 1)) / float(exec_price)
+            return 0.0
         
         for i, (timestamp, row) in enumerate(df.iterrows()):
-            # 爆仓后直接停止回测，输出结果
             if is_liquidated:
                 break
 
@@ -3007,7 +3339,7 @@ class BacktestService:
                     'balance': 0
                 })
                 equity_curve.append({'time': timestamp.strftime('%Y-%m-%d %H:%M'), 'value': 0})
-                break  # 直接停止
+                break
             
             # Use OHLC to evaluate triggers.
             high = row['high']
@@ -3582,10 +3914,18 @@ class BacktestService:
                     target_price = add_long_price_arr[i] if add_long_price_arr[i] > 0 else close
                     exec_price = target_price * (1 + slippage)
                     
-                    # Use specified pct to add
+                    # Use explicit script sizing first; fallback to pct scale-in.
                     position_pct = position_size_arr[i] if position_size_arr[i] > 0 else 0.1
-                    use_capital = capital * position_pct
-                    shares = (use_capital * leverage) / exec_price
+                    shares = _shares_from_explicit_or_pct(
+                        exec_price=exec_price,
+                        capital_now=capital,
+                        quote_amount=add_long_quote_arr[i],
+                        base_qty=add_long_base_qty_arr[i],
+                        fallback_pct=position_pct,
+                        fallback_full=False,
+                    )
+                    if shares <= 0:
+                        continue
                     commission_fee = shares * exec_price * commission
                     
                     # Update average cost
@@ -3614,10 +3954,18 @@ class BacktestService:
                     target_price = add_short_price_arr[i] if add_short_price_arr[i] > 0 else close
                     exec_price = target_price * (1 - slippage)
                     
-                    # Use specified pct to add
+                    # Use explicit script sizing first; fallback to pct scale-in.
                     position_pct = position_size_arr[i] if position_size_arr[i] > 0 else 0.1
-                    use_capital = capital * position_pct
-                    shares = (use_capital * leverage) / exec_price
+                    shares = _shares_from_explicit_or_pct(
+                        exec_price=exec_price,
+                        capital_now=capital,
+                        quote_amount=add_short_quote_arr[i],
+                        base_qty=add_short_base_qty_arr[i],
+                        fallback_pct=position_pct,
+                        fallback_full=False,
+                    )
+                    if shares <= 0:
+                        continue
                     commission_fee = shares * exec_price * commission
                     
                     # Update average cost
@@ -3674,7 +4022,6 @@ class BacktestService:
                         lowest_since_entry = None
                         trend_add_times = dca_add_times = trend_reduce_times = adverse_reduce_times = 0
                         last_trend_add_anchor = last_dca_add_anchor = last_trend_reduce_anchor = last_adverse_reduce_anchor = None
-                        # 检查是否爆仓
                         if capital < min_capital_to_trade:
                             is_liquidated = True
                             capital = 0
@@ -3689,17 +4036,22 @@ class BacktestService:
                         base_price = open_long_price_arr[i] if open_long_price_arr[i] > 0 else close
                     exec_price = base_price * (1 + slippage)
                     
-                    # Use specified pct (entryPct > position_size > full)
+                    # Use explicit script sizing first; fallback to pct/full.
                     position_pct = None
-                    if entry_pct_cfg and entry_pct_cfg > 0:
+                    if open_long_quote_arr[i] <= 0 and open_long_base_qty_arr[i] <= 0 and entry_pct_cfg and entry_pct_cfg > 0:
                         position_pct = entry_pct_cfg
-                    elif has_position_management and position_size_arr[i] > 0:
+                    elif open_long_quote_arr[i] <= 0 and open_long_base_qty_arr[i] <= 0 and has_position_management and position_size_arr[i] > 0:
                         position_pct = position_size_arr[i]
-                    if position_pct is not None and position_pct > 0 and position_pct < 1:
-                        use_capital = capital * position_pct
-                        shares = (use_capital * leverage) / exec_price
-                    else:
-                        shares = (capital * leverage) / exec_price
+                    shares = _shares_from_explicit_or_pct(
+                        exec_price=exec_price,
+                        capital_now=capital,
+                        quote_amount=open_long_quote_arr[i],
+                        base_qty=open_long_base_qty_arr[i],
+                        fallback_pct=position_pct,
+                        fallback_full=True,
+                    )
+                    if shares <= 0:
+                        continue
                     
                     commission_fee = shares * exec_price * commission
                     
@@ -3799,7 +4151,6 @@ class BacktestService:
                         lowest_since_entry = None
                         trend_add_times = dca_add_times = trend_reduce_times = adverse_reduce_times = 0
                         last_trend_add_anchor = last_dca_add_anchor = last_trend_reduce_anchor = last_adverse_reduce_anchor = None
-                        # 检查是否爆仓
                         if capital < min_capital_to_trade:
                             is_liquidated = True
                             capital = 0
@@ -3814,17 +4165,22 @@ class BacktestService:
                         base_price = open_short_price_arr[i] if open_short_price_arr[i] > 0 else close
                     exec_price = base_price * (1 - slippage)
                     
-                    # Use specified pct (entryPct > position_size > full)
+                    # Use explicit script sizing first; fallback to pct/full.
                     position_pct = None
-                    if entry_pct_cfg and entry_pct_cfg > 0:
+                    if open_short_quote_arr[i] <= 0 and open_short_base_qty_arr[i] <= 0 and entry_pct_cfg and entry_pct_cfg > 0:
                         position_pct = entry_pct_cfg
-                    elif has_position_management and position_size_arr[i] > 0:
+                    elif open_short_quote_arr[i] <= 0 and open_short_base_qty_arr[i] <= 0 and has_position_management and position_size_arr[i] > 0:
                         position_pct = position_size_arr[i]
-                    if position_pct is not None and position_pct > 0 and position_pct < 1:
-                        use_capital = capital * position_pct
-                        shares = (use_capital * leverage) / exec_price
-                    else:
-                        shares = (capital * leverage) / exec_price
+                    shares = _shares_from_explicit_or_pct(
+                        exec_price=exec_price,
+                        capital_now=capital,
+                        quote_amount=open_short_quote_arr[i],
+                        base_qty=open_short_base_qty_arr[i],
+                        fallback_pct=position_pct,
+                        fallback_full=True,
+                    )
+                    if shares <= 0:
+                        continue
                     
                     commission_fee = shares * exec_price * commission
                     
@@ -3902,7 +4258,6 @@ class BacktestService:
             # If liquidation hit, check SL signal first
             if position != 0 and not is_liquidated:
                 if position_type == 'long' and low <= liquidation_price:
-                    # Long触及爆仓线：检查是否有止损信号
                     has_stop_loss = close_long_arr[i] and close_long_price_arr[i] > 0
                     stop_loss_price = close_long_price_arr[i] if has_stop_loss else 0
                     
@@ -3926,7 +4281,7 @@ class BacktestService:
                     else:
                         # SL not strict enough, liquidation triggered
                         logger.warning(f"Long liquidation! entry={entry_price:.2f}, low={low:.2f}, "
-                                     f"爆仓线={liquidation_price:.2f}, 止损价={stop_loss_price:.2f}")
+                                     f"liquidation_price={liquidation_price:.2f}, stop_loss_price={stop_loss_price:.2f}")
                         is_liquidated = True
                         liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
@@ -3945,12 +4300,11 @@ class BacktestService:
                     continue
                     
                 elif position_type == 'short' and high >= liquidation_price:
-                    # Short触及爆仓线：检查是否有止损信号
                     has_stop_loss = close_short_arr[i] and close_short_price_arr[i] > 0
                     stop_loss_price = close_short_price_arr[i] if has_stop_loss else 0
                     
                     logger.warning(f"[candle {i}] Short hit liquidation! entry={entry_price:.2f}, high={high:.2f}, liq_price={liquidation_price:.2f}, "
-                              f"止损信号={close_short_arr[i]}, 止损价={stop_loss_price:.4f}, 时间={timestamp}")
+                              f"stop_signal={close_short_arr[i]}, stop_loss_price={stop_loss_price:.4f}, time={timestamp}")
                     
                     # Determine SL or liquidation first
                     if has_stop_loss and stop_loss_price < liquidation_price:
@@ -3973,7 +4327,7 @@ class BacktestService:
                     else:
                         # SL not strict enough, liquidation triggered
                         logger.warning(f"Short liquidation! entry={entry_price:.2f}, high={high:.2f}, "
-                                     f"爆仓线={liquidation_price:.2f}, 止损价={stop_loss_price:.2f}")
+                                     f"liquidation_price={liquidation_price:.2f}, stop_loss_price={stop_loss_price:.2f}")
                         is_liquidated = True
                         liquidation_loss = self._liquidation_loss(capital)
                         capital = 0
@@ -4076,7 +4430,7 @@ class BacktestService:
         end_date: datetime,
         total_commission: float = 0
     ) -> Dict:
-        """计算回测指标"""
+        """Calculate backtest metrics."""
         if not equity_curve:
             return {}
         
@@ -4143,7 +4497,7 @@ class BacktestService:
         }
     
     def _calculate_max_drawdown(self, values: List[float]) -> float:
-        """计算最大回撤"""
+        """Calculate maximum drawdown."""
         if not values:
             return 0
         
@@ -4161,12 +4515,12 @@ class BacktestService:
     
     def _calculate_sharpe(self, values: List[float], timeframe: str = '1D', risk_free_rate: float = 0.02) -> float:
         """
-        计算夏普比率
+        Calculate Sharpe ratio.
         
         Args:
-            values: 权益曲线数值列表
-            timeframe: 时间周期
-            risk_free_rate: 无风险收益率（年化）
+            values: Equity curve values.
+            timeframe: Bar timeframe.
+            risk_free_rate: Annualized risk-free rate.
         """
         if len(values) < 2:
             return 0
@@ -4179,11 +4533,11 @@ class BacktestService:
         # Determine annualization factor by timeframe
         annualization_factor = {
             '1m': 252 * 24 * 60,      # 1m candle: ~362,880
-            '5m': 252 * 24 * 12,      # 5分钟K：约72,576
-            '15m': 252 * 24 * 4,      # 15分钟K：约24,192
-            '30m': 252 * 24 * 2,      # 30分钟K：约12,096
+            '5m': 252 * 24 * 12,      # 5m candle: ~72,576
+            '15m': 252 * 24 * 4,      # 15m candle: ~24,192
+            '30m': 252 * 24 * 2,      # 30m candle: ~12,096
             '1H': 252 * 24,           # 1H candle: 6,048
-            '4H': 252 * 6,            # 4小时K：1,512
+            '4H': 252 * 6,            # 4H candle: 1,512
             '1D': 252,                # 1D candle: 252
             '1W': 52                  # 1W candle: 52
         }.get(timeframe, 252)
@@ -4286,7 +4640,7 @@ class BacktestService:
         For pure signal-triggered open/close (no _stop/_profit/_trailing/liquidation
         suffix) under `next_bar_open`, signal bar is exactly one signal_tf BEFORE
         the execution bar. For SL/TP/trailing/liquidation triggers, there is no
-        meaningful "signal bar" — they fire intra-bar from the price path — so we
+        meaningful "signal bar"; they fire intra-bar from the price path, so we
         align signal_bar_time to bar_time so the renderer only draws a single marker.
         For `bar_close` execution mode, signal and execution coincide on the same bar.
         """
@@ -4328,7 +4682,7 @@ class BacktestService:
         equity_curve: List,
         trades: List
     ) -> Dict[str, Any]:
-        """格式化回测结果"""
+        """Format backtest result for API responses."""
         # Simplify equity curve
         max_points = 500
         if len(equity_curve) > max_points:
@@ -4337,7 +4691,7 @@ class BacktestService:
         
         # Clean NaN/Inf values for JSON serialization
         def clean_value(value):
-            """清理数值，将NaN/Inf转换为0"""
+            """Clean NaN/Inf values."""
             if isinstance(value, float):
                 if np.isnan(value) or np.isinf(value):
                     return 0
@@ -4359,10 +4713,33 @@ class BacktestService:
         # Clean trades
         cleaned_trades = []
         # Don't truncate trades: return all (frontend can paginate)
+        def infer_trade_reason(trade_type: str) -> str:
+            t = str(trade_type or '').lower()
+            if 'liquidation' in t:
+                return 'liquidation'
+            if 'trailing' in t:
+                return 'trailing_stop'
+            if 'stop' in t:
+                return 'stop_loss'
+            if 'profit' in t:
+                return 'take_profit'
+            if 'reduce' in t:
+                return 'reduce_position'
+            if 'add' in t:
+                return 'add_position'
+            if 'close' in t:
+                return 'signal_close'
+            return ''
+
         for trade in trades:
             cleaned_trade = {}
             for key, value in trade.items():
                 cleaned_trade[key] = clean_value(value)
+            inferred_reason = infer_trade_reason(cleaned_trade.get('type'))
+            if inferred_reason and not cleaned_trade.get('reason'):
+                cleaned_trade['reason'] = inferred_reason
+            if inferred_reason and not cleaned_trade.get('close_reason'):
+                cleaned_trade['close_reason'] = inferred_reason
             cleaned_trades.append(cleaned_trade)
         
         return {

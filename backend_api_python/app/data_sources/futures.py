@@ -31,6 +31,7 @@ _TD_FUTURES_SYMBOLS = {
     'GC': 'GC', 'SI': 'SI', 'CL': 'CL', 'NG': 'NG',
     'ZC': 'ZC', 'ZW': 'ZW', 'HG': 'HG', 'PL': 'PL',
     'ES': 'ES', 'NQ': 'NQ', 'YM': 'YM', 'RTY': 'RTY',
+    'ZS': 'ZS',
 }
 
 
@@ -51,6 +52,11 @@ _TIINGO_PRECIOUS_METALS_MAP = {
     'SI': 'xagusd',
 }
 
+_FOREX_METALS_MAP = {
+    'GC': 'XAUUSD',
+    'SI': 'XAGUSD',
+}
+
 _TIINGO_TIMEFRAME_MAP = {
     '5m': '5min', '15m': '15min', '30m': '30min',
     '1H': '1hour', '4H': '4hour', '1D': '1day',
@@ -62,7 +68,6 @@ class FuturesDataSource(BaseDataSource):
     
     name = "Futures"
     
-    # Yahoo Finance时间周期映射
     YF_TIMEFRAME_MAP = {
         '1m': '1m',
         '5m': '5m',
@@ -74,10 +79,8 @@ class FuturesDataSource(BaseDataSource):
         '1W': '1wk'
     }
     
-    # CCXT时间周期映射
     CCXT_TIMEFRAME_MAP = CCXTConfig.TIMEFRAME_MAP
     
-    # 传统期货合约代码（Yahoo Finance）
     YF_SYMBOLS = {
         'GC': 'GC=F',   # 黄金期货
         'SI': 'SI=F',   # 白银期货
@@ -88,7 +91,6 @@ class FuturesDataSource(BaseDataSource):
     }
     
     def __init__(self):
-        # 初始化CCXT（用于加密货币期货）
         config = {
             'timeout': CCXTConfig.TIMEOUT,
             'enableRateLimit': CCXTConfig.ENABLE_RATE_LIMIT,
@@ -233,8 +235,8 @@ class FuturesDataSource(BaseDataSource):
             after_time: 预留与基类一致（当前期货链路未使用）
         """
         _ = after_time
-        # 判断是传统期货还是加密货币期货
-        if symbol in self.YF_SYMBOLS or symbol.endswith('=F'):
+        base_symbol = symbol.replace("=F", "").upper()
+        if base_symbol in _TD_FUTURES_SYMBOLS or symbol.endswith('=F'):
             return self._get_traditional_futures(symbol, timeframe, limit, before_time)
         else:
             return self._get_crypto_futures(symbol, timeframe, limit, before_time)
@@ -250,6 +252,7 @@ class FuturesDataSource(BaseDataSource):
         for fetcher in (
             self._get_traditional_futures_td,
             self._get_traditional_futures_yf,
+            self._get_traditional_futures_forex_spot,
             self._get_traditional_futures_tiingo,
         ):
             try:
@@ -259,6 +262,21 @@ class FuturesDataSource(BaseDataSource):
             except Exception as e:
                 logger.debug("Futures kline %s failed for %s: %s", fetcher.__name__, symbol, e)
         return []
+
+    def _get_traditional_futures_forex_spot(
+        self, symbol: str, timeframe: str, limit: int, before_time: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Fallback GC/SI to spot metals when futures feeds are rate-limited."""
+        spot_symbol = _FOREX_METALS_MAP.get(symbol.replace("=F", "").upper())
+        if not spot_symbol:
+            return []
+        try:
+            from app.data_sources.forex import ForexDataSource
+
+            return ForexDataSource().get_kline(spot_symbol, timeframe, limit, before_time)
+        except Exception as e:
+            logger.debug("Forex metals fallback failed %s: %s", symbol, e)
+            return []
 
     def _get_traditional_futures_td(
         self, symbol: str, timeframe: str, limit: int, before_time: Optional[int] = None
@@ -424,13 +442,10 @@ class FuturesDataSource(BaseDataSource):
     ) -> List[Dict[str, Any]]:
         """使用CCXT获取加密货币期货数据"""
         try:
-            # 确保symbol格式正确
             ccxt_symbol = symbol if '/' in symbol else f"{symbol}/USDT"
             ccxt_timeframe = self.CCXT_TIMEFRAME_MAP.get(timeframe, '1d')
             
-            # logger.info(f"获取加密货币期货K线: {ccxt_symbol}, 周期: {ccxt_timeframe}, 条数: {limit}")
             
-            # 获取数据
             if before_time:
                 since_time = before_time - limit * self._get_timeframe_seconds(timeframe)
                 ohlcv = self.exchange.fetch_ohlcv(
@@ -446,7 +461,6 @@ class FuturesDataSource(BaseDataSource):
                     limit=limit
                 )
             
-            # 转换格式
             klines = []
             for candle in ohlcv:
                 klines.append({
@@ -458,7 +472,6 @@ class FuturesDataSource(BaseDataSource):
                     'volume': float(candle[5])
                 })
             
-            # logger.info(f"获取到 {len(klines)} 条加密货币期货数据")
             return klines
             
         except Exception as e:

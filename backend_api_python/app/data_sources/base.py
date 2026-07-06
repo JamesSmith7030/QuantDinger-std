@@ -1,6 +1,7 @@
 """
-数据源基类
-定义统一的数据源接口
+Base market data source interfaces.
+
+All market data adapters should normalize K-line rows to the shape defined here.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
@@ -11,7 +12,6 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-# K线周期映射（秒数）
 TIMEFRAME_SECONDS = {
     '1m': 60,
     '3m': 180,
@@ -26,7 +26,7 @@ TIMEFRAME_SECONDS = {
 
 
 class BaseDataSource(ABC):
-    """数据源基类"""
+    """Base class for market data sources."""
     
     name: str = "base"
     
@@ -40,17 +40,17 @@ class BaseDataSource(ABC):
         after_time: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
-        获取K线数据
+        Fetch K-line data.
         
         Args:
-            symbol: 交易对/股票代码
-            timeframe: 时间周期 (1m, 5m, 15m, 30m, 1H, 4H, 1D, 1W)
-            limit: 数据条数
-            before_time: 获取此时间之前的数据（Unix时间戳，秒）
-            after_time: 可选，仅保留 time >= after_time 的 K 线（Unix 秒），用于回测窗口左边界
+            symbol: Trading pair or ticker.
+            timeframe: Candle interval (1m, 5m, 15m, 30m, 1H, 4H, 1D, 1W).
+            limit: Number of rows to fetch.
+            before_time: Fetch rows before this Unix timestamp, in seconds.
+            after_time: Optional left boundary. Keep only rows with time >= after_time.
             
         Returns:
-            K线数据列表，格式:
+            K-line rows in this normalized shape:
             [{"time": int, "open": float, "high": float, "low": float, "close": float, "volume": float}, ...]
         """
         pass
@@ -73,7 +73,7 @@ class BaseDataSource(ABC):
         close: float,
         volume: float
     ) -> Dict[str, Any]:
-        """格式化单条K线数据"""
+        """Normalize one K-line row."""
         return {
             'time': timestamp,
             'open': round(float(open_price), 4),
@@ -90,15 +90,15 @@ class BaseDataSource(ABC):
         buffer_ratio: float = 1.2
     ) -> int:
         """
-        计算获取指定数量K线所需的时间范围（秒）
+        Calculate the time range required to fetch the requested candle count.
         
         Args:
-            timeframe: 时间周期
-            limit: K线数量
-            buffer_ratio: 缓冲系数
+            timeframe: Candle interval.
+            limit: Number of candles.
+            buffer_ratio: Extra range multiplier.
             
         Returns:
-            时间范围（秒）
+            Time range in seconds.
         """
         seconds_per_candle = TIMEFRAME_SECONDS.get(timeframe, 86400)
         return int(seconds_per_candle * limit * buffer_ratio)
@@ -112,28 +112,26 @@ class BaseDataSource(ABC):
         truncate: bool = True,
     ) -> List[Dict[str, Any]]:
         """
-        过滤和限制K线数据
+        Filter and limit K-line rows.
         
         Args:
-            klines: K线数据列表
-            limit: 最大数量
-            before_time: 过滤此时间之后的数据
-            after_time: 若设置，仅保留 time >= after_time
-            truncate: 为 False 时不在末尾按 limit 截断（回测需整段 [after_time, before_time) 时避免误丢左端）
+            klines: K-line rows.
+            limit: Maximum number of rows.
+            before_time: Keep rows before this timestamp.
+            after_time: Keep rows with time >= after_time when set.
+            truncate: When False, do not trim the tail by limit. Backtests need the
+                full [after_time, before_time) window and must not lose the left edge.
             
         Returns:
-            处理后的K线数据
+            Filtered K-line rows.
         """
-        # 按时间排序
         klines.sort(key=lambda x: x['time'])
         
-        # 过滤时间
         if before_time:
             klines = [k for k in klines if k['time'] < before_time]
         if after_time is not None:
             klines = [k for k in klines if k['time'] >= after_time]
         
-        # 限制数量（取最新的）
         if truncate and len(klines) > limit:
             klines = klines[-limit:]
         
@@ -145,12 +143,14 @@ class BaseDataSource(ABC):
         klines: List[Dict[str, Any]],
         timeframe: str
     ):
-        """记录获取结果日志。
+        """Log fetch result quality.
 
-        延迟判断：
-        - K 线 time 为 Unix 秒（UTC），与 datetime.now(UTC) 比较，避免本地时区误差。
-        - 日线/周线：最后一根通常是「上一交易日收盘」，周末/节假日可达 3～4 天，
-          原先用 2×86400s（48h）会在周一早盘误报；改为日线最多容忍约 5 个自然日，周线更宽。
+        Delay checks:
+        - K-line time is a UTC Unix timestamp. Compare with datetime.now(UTC) to
+          avoid local timezone drift.
+        - Daily and weekly bars often represent the previous market close. Weekends
+          and holidays can create a 3-4 day gap, so daily bars allow about 5
+          calendar days and weekly bars allow a wider threshold.
         """
         if klines:
             latest_ts = int(klines[-1]["time"])
@@ -160,13 +160,10 @@ class BaseDataSource(ABC):
 
             tf_sec = TIMEFRAME_SECONDS.get(timeframe, 3600)
             if tf_sec < 86400:
-                # 分钟/小时级：超过约 2 根 K 未更新则告警
                 max_diff = tf_sec * 2
             elif tf_sec == 86400:
-                # 日线：覆盖周末 + 短假期（约 5 个自然日）
                 max_diff = 5 * 86400
             else:
-                # 周线：允许跨多周数据滞后
                 max_diff = max(tf_sec * 2, 21 * 86400)
 
             if time_diff > max_diff:

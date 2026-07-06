@@ -10,6 +10,16 @@ from io import StringIO
 import re
 from flask import Response, g, jsonify, request
 from app.openapi.blueprint import HumanBlueprint as Blueprint
+from app.services.user_preferences import (
+    change_user_password,
+    delete_chart_template as delete_chart_template_service,
+    ensure_chart_templates_column,
+    get_notification_settings as get_notification_settings_service,
+    list_chart_templates as list_chart_templates_service,
+    save_chart_template as save_chart_template_service,
+    send_test_notification,
+    update_notification_settings as update_notification_settings_service,
+)
 from app.services.user_service import get_user_service
 from app.utils.auth import login_required, admin_required
 from app.utils.db import get_db_connection
@@ -31,20 +41,8 @@ def _parse_positive_int(value) -> int:
 
 
 def _ensure_chart_templates_column():
-    """Add qd_users.chart_templates when upgrading existing databases."""
-    try:
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute(
-                """
-                ALTER TABLE qd_users
-                ADD COLUMN IF NOT EXISTS chart_templates TEXT DEFAULT ''
-                """
-            )
-            db.commit()
-            cur.close()
-    except Exception as e:
-        logger.warning(f"ensure chart_templates column skipped: {e}")
+    """Back-compatible wrapper for older route-local callers."""
+    ensure_chart_templates_column()
 
 user_blp = Blueprint('user_manage', __name__)
 
@@ -566,6 +564,81 @@ def update_profile():
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 
+@user_blp.route('/mfa/status', methods=['GET'])
+@login_required
+def get_mfa_status():
+    """Get current user's authenticator-app MFA status."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+        from app.services.mfa_service import get_mfa_service
+        return jsonify({'code': 1, 'msg': 'success', 'data': get_mfa_service().get_status(int(user_id))})
+    except Exception as e:
+        logger.error(f"get_mfa_status failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_blp.route('/mfa/setup/start', methods=['POST'])
+@login_required
+def start_mfa_setup():
+    """Start authenticator-app binding and return QR code data."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+        user = get_user_service().get_user_by_id(int(user_id)) or {}
+        label = user.get('email') or user.get('username') or f'user-{user_id}'
+        from app.services.mfa_service import get_mfa_service
+        data = get_mfa_service().start_setup(int(user_id), label)
+        return jsonify({'code': 1, 'msg': 'Scan the QR code with your authenticator app', 'data': data})
+    except ValueError as e:
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 400
+    except Exception as e:
+        logger.error(f"start_mfa_setup failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_blp.route('/mfa/setup/confirm', methods=['POST'])
+@login_required
+def confirm_mfa_setup():
+    """Confirm authenticator-app binding with a 6-digit TOTP code."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+        data = request.get_json() or {}
+        code = data.get('code') or ''
+        from app.services.mfa_service import get_mfa_service
+        result = get_mfa_service().confirm_setup(int(user_id), code)
+        return jsonify({'code': 1, 'msg': 'MFA enabled successfully', 'data': result})
+    except ValueError as e:
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 400
+    except Exception as e:
+        logger.error(f"confirm_mfa_setup failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_blp.route('/mfa/disable', methods=['POST'])
+@login_required
+def disable_mfa():
+    """Disable current user's authenticator-app MFA after code verification."""
+    try:
+        user_id = getattr(g, 'user_id', None)
+        if not user_id:
+            return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
+        data = request.get_json() or {}
+        code = data.get('code') or ''
+        from app.services.mfa_service import get_mfa_service
+        get_mfa_service().disable(int(user_id), code)
+        return jsonify({'code': 1, 'msg': 'MFA disabled successfully', 'data': None})
+    except ValueError as e:
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 400
+    except Exception as e:
+        logger.error(f"disable_mfa failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
 @user_blp.route('/my-credits-log', methods=['GET'])
 @login_required
 def get_my_credits_log():
@@ -681,134 +754,31 @@ def get_my_referrals():
 @user_blp.route('/notification-settings', methods=['GET'])
 @login_required
 def get_notification_settings():
-    """
-    Get current user's notification settings.
-    
-    Returns:
-        notification_settings: {
-            default_channels: ['browser', 'telegram', ...],
-            telegram_chat_id: str,
-            email: str (optional, override for notifications),
-            discord_webhook: str (optional)
-        }
-    """
+    """Get current user's notification settings."""
     try:
-        import json
-        from app.utils.db import get_db_connection
-        
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-        
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT notification_settings, email FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            cur.close()
-        
-        if not row:
+        settings = get_notification_settings_service(int(user_id))
+        if settings is None:
             return jsonify({'code': 0, 'msg': 'User not found', 'data': None}), 404
-        
-        # Parse notification_settings JSON
-        settings_str = row.get('notification_settings') or ''
-        settings = {}
-        if settings_str:
-            try:
-                settings = json.loads(settings_str)
-            except Exception:
-                settings = {}
-        
-        # Default values
-        if 'default_channels' not in settings:
-            settings['default_channels'] = ['browser']
-        if 'email' not in settings:
-            settings['email'] = row.get('email') or ''
-        
-        return jsonify({
-            'code': 1,
-            'msg': 'success',
-            'data': settings
-        })
+        return jsonify({'code': 1, 'msg': 'success', 'data': settings})
     except Exception as e:
         logger.error(f"get_notification_settings failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/notification-settings', methods=['PUT'])
 @login_required
 def update_notification_settings():
-    """
-    Update current user's notification settings.
-    
-    Request body:
-        default_channels: list of str (optional, e.g. ['browser', 'telegram'])
-        telegram_bot_token: str (optional, user's own Telegram bot token)
-        telegram_chat_id: str (optional)
-        email: str (optional, for notification override)
-        discord_webhook: str (optional)
-    """
+    """Update current user's notification settings."""
     try:
-        import json
-        from app.utils.db import get_db_connection
-        
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-        
-        data = request.get_json() or {}
-        
-        # Validate channels
-        valid_channels = ['browser', 'email', 'telegram', 'discord', 'webhook', 'phone']
-        default_channels = data.get('default_channels', [])
-        if not isinstance(default_channels, list):
-            default_channels = ['browser']
-        default_channels = [c for c in default_channels if c in valid_channels]
-        if not default_channels:
-            default_channels = ['browser']
-        
-        # Build settings object
-        #
-        # webhook_signing_secret is optional and only meaningful for
-        # specific dialects (Feishu in-body sign / DingTalk URL sign).
-        # Generic self-hosted webhooks can use it for HMAC header
-        # signing — see signal_notifier._notify_webhook for the full
-        # semantics.
-        settings = {
-            'default_channels': default_channels,
-            'telegram_bot_token': str(data.get('telegram_bot_token') or '').strip(),
-            'telegram_chat_id': str(data.get('telegram_chat_id') or '').strip(),
-            'email': str(data.get('email') or '').strip(),
-            'discord_webhook': str(data.get('discord_webhook') or '').strip(),
-            'webhook_url': str(data.get('webhook_url') or '').strip(),
-            'webhook_token': str(data.get('webhook_token') or '').strip(),
-            'webhook_signing_secret': str(data.get('webhook_signing_secret') or '').strip(),
-            'phone': str(data.get('phone') or '').strip(),
-        }
-        
-        # Remove empty values (but keep default_channels and telegram_bot_token even if partially filled)
-        settings = {k: v for k, v in settings.items() if v or k == 'default_channels'}
-        
-        settings_json = json.dumps(settings, ensure_ascii=False)
-        
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute(
-                "UPDATE qd_users SET notification_settings = ?, updated_at = NOW() WHERE id = ?",
-                (settings_json, user_id)
-            )
-            db.commit()
-            cur.close()
-        
-        return jsonify({
-            'code': 1,
-            'msg': 'Notification settings updated',
-            'data': settings
-        })
+        settings = update_notification_settings_service(int(user_id), request.get_json() or {})
+        return jsonify({'code': 1, 'msg': 'Notification settings updated', 'data': settings})
     except Exception as e:
         logger.error(f"update_notification_settings failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/chart-templates', methods=['GET'])
 @login_required
 def get_chart_templates():
@@ -817,35 +787,11 @@ def get_chart_templates():
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-
-        _ensure_chart_templates_column()
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            cur.close()
-
-        raw = (row.get('chart_templates') if row else '') or ''
-        templates = []
-        if raw:
-            try:
-                templates = json.loads(raw)
-            except Exception:
-                templates = []
-        if not isinstance(templates, list):
-            templates = []
-
-        templates = sorted(
-            [tpl for tpl in templates if isinstance(tpl, dict)],
-            key=lambda x: str(x.get('updated_at') or ''),
-            reverse=True
-        )
+        templates = list_chart_templates_service(int(user_id))
         return jsonify({'code': 1, 'msg': 'success', 'data': templates})
     except Exception as e:
         logger.error(f"get_chart_templates failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/chart-templates', methods=['POST'])
 @login_required
 def save_chart_template():
@@ -854,101 +800,13 @@ def save_chart_template():
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-
-        data = request.get_json() or {}
-        name = str(data.get('name') or '').strip()
-        template_id = str(data.get('template_id') or '').strip()
-        indicators = data.get('indicators') or []
-
-        if not name:
-            return jsonify({'code': 0, 'msg': 'Template name is required', 'data': None}), 400
-        if len(name) > 80:
-            return jsonify({'code': 0, 'msg': 'Template name is too long', 'data': None}), 400
-        if not isinstance(indicators, list):
-            return jsonify({'code': 0, 'msg': 'Indicators must be a list', 'data': None}), 400
-
-        sanitized = []
-        for item in indicators:
-            if not isinstance(item, dict):
-                continue
-            indicator_id = str(item.get('id') or '').strip()
-            instance_id = str(item.get('instanceId') or '').strip()
-            indicator_type = str(item.get('type') or '').strip()
-            if not indicator_id or not instance_id or not indicator_type:
-                continue
-            params = item.get('params') if isinstance(item.get('params'), dict) else {}
-            style = item.get('style') if isinstance(item.get('style'), dict) else {}
-            sanitized.append({
-                'id': indicator_id,
-                'instanceId': instance_id,
-                'name': str(item.get('name') or '').strip(),
-                'shortName': str(item.get('shortName') or '').strip(),
-                'type': indicator_type,
-                'visible': bool(item.get('visible', True)),
-                'params': params,
-                'style': {
-                    'color': str(style.get('color') or '').strip(),
-                    'lineWidth': int(style.get('lineWidth') or 2)
-                }
-            })
-
-        now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-        _ensure_chart_templates_column()
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            raw = (row.get('chart_templates') if row else '') or ''
-            templates = []
-            if raw:
-                try:
-                    templates = json.loads(raw)
-                except Exception:
-                    templates = []
-            if not isinstance(templates, list):
-                templates = []
-
-            saved = None
-            updated_templates = []
-            if template_id:
-                for tpl in templates:
-                    if isinstance(tpl, dict) and str(tpl.get('id') or '') == template_id:
-                        tpl = {
-                            **tpl,
-                            'id': template_id,
-                            'name': name,
-                            'indicators': sanitized,
-                            'updated_at': now_iso
-                        }
-                        saved = tpl
-                    updated_templates.append(tpl)
-            else:
-                updated_templates = [tpl for tpl in templates if isinstance(tpl, dict)]
-
-            if saved is None:
-                saved = {
-                    'id': f"tpl_{int(time.time() * 1000)}",
-                    'name': name,
-                    'indicators': sanitized,
-                    'created_at': now_iso,
-                    'updated_at': now_iso
-                }
-                updated_templates.append(saved)
-
-            updated_templates = sorted(updated_templates, key=lambda x: str(x.get('updated_at') or ''), reverse=True)[:20]
-            cur.execute(
-                "UPDATE qd_users SET chart_templates = ?, updated_at = NOW() WHERE id = ?",
-                (json.dumps(updated_templates, ensure_ascii=False), user_id)
-            )
-            db.commit()
-            cur.close()
-
-        return jsonify({'code': 1, 'msg': 'Chart template saved', 'data': saved})
+        ok, msg, saved = save_chart_template_service(int(user_id), request.get_json() or {})
+        if not ok:
+            return jsonify({'code': 0, 'msg': msg, 'data': None}), 400
+        return jsonify({'code': 1, 'msg': msg, 'data': saved})
     except Exception as e:
         logger.error(f"save_chart_template failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/chart-templates', methods=['DELETE'])
 @login_required
 def delete_chart_template():
@@ -957,199 +815,47 @@ def delete_chart_template():
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-
-        template_id = str(request.args.get('template_id') or '').strip()
-        if not template_id:
-            return jsonify({'code': 0, 'msg': 'template_id is required', 'data': None}), 400
-
-        _ensure_chart_templates_column()
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT chart_templates FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            raw = (row.get('chart_templates') if row else '') or ''
-            templates = []
-            if raw:
-                try:
-                    templates = json.loads(raw)
-                except Exception:
-                    templates = []
-            if not isinstance(templates, list):
-                templates = []
-
-            updated_templates = [
-                tpl for tpl in templates
-                if not (isinstance(tpl, dict) and str(tpl.get('id') or '') == template_id)
-            ]
-            cur.execute(
-                "UPDATE qd_users SET chart_templates = ?, updated_at = NOW() WHERE id = ?",
-                (json.dumps(updated_templates, ensure_ascii=False), user_id)
-            )
-            db.commit()
-            cur.close()
-
-        return jsonify({'code': 1, 'msg': 'Chart template deleted', 'data': {'template_id': template_id}})
+        ok, msg, data = delete_chart_template_service(int(user_id), request.args.get('template_id'))
+        if not ok:
+            return jsonify({'code': 0, 'msg': msg, 'data': None}), 400
+        return jsonify({'code': 1, 'msg': msg, 'data': data})
     except Exception as e:
         logger.error(f"delete_chart_template failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/notification-settings/test', methods=['POST'])
 @login_required
 def test_notification_settings():
-    """
-    Send a test notification using the current user's saved notification_settings
-    (save settings first via PUT /notification-settings).
-    """
+    """Send a test notification using saved notification settings."""
     try:
-        import json
-        from app.services.signal_notifier import SignalNotifier
-        from app.utils.db import get_db_connection
-
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT notification_settings, email FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            cur.close()
-
-        if not row:
-            return jsonify({'code': 0, 'msg': 'User not found', 'data': None}), 404
-
-        settings_str = row.get('notification_settings') or ''
-        account_email = (row.get('email') or '').strip()
-        settings = {}
-        if settings_str:
-            try:
-                settings = json.loads(settings_str)
-            except Exception:
-                settings = {}
-
-        channels = settings.get('default_channels') or ['browser']
-        if not isinstance(channels, list) or not channels:
-            channels = ['browser']
-
-        notify_email = (settings.get('email') or '').strip() or account_email
-        targets = {
-            'telegram': (settings.get('telegram_chat_id') or '').strip(),
-            'telegram_bot_token': (settings.get('telegram_bot_token') or '').strip(),
-            'email': notify_email,
-            'phone': (settings.get('phone') or '').strip(),
-            'discord': (settings.get('discord_webhook') or '').strip(),
-            'webhook': (settings.get('webhook_url') or '').strip(),
-            'webhook_token': (settings.get('webhook_token') or '').strip(),
-            'webhook_signing_secret': (settings.get('webhook_signing_secret') or '').strip(),
-        }
-
         accept = (request.headers.get('Accept-Language') or '') + ' ' + (request.headers.get('X-Locale') or '')
-        language = 'zh-CN' if 'zh' in accept.lower() else 'en-US'
-
-        notifier = SignalNotifier()
-        results = notifier.send_profile_test_notifications(
-            user_id=int(user_id),
-            channels=channels,
-            targets=targets,
-            language=language,
-        )
-
-        any_ok = any((v or {}).get('ok') for v in results.values())
-        failed = [k for k, v in results.items() if not (v or {}).get('ok')]
-        if failed:
-            err_detail = {k: (results.get(k) or {}).get('error', '') for k in failed}
-            logger.warning("notification_settings test: user_id=%s failed_channels=%s errors=%s", user_id, failed, err_detail)
-
-        if not any_ok:
-            detail = '; '.join(f"{k}: {(results[k] or {}).get('error', '')}" for k in failed) or 'all channels failed'
-            return jsonify({'code': 0, 'msg': detail, 'data': {'results': results}})
-
-        msg = 'Test notification sent'
-        if failed:
-            msg = f"Sent OK; failed: {', '.join(failed)}"
-        return jsonify({'code': 1, 'msg': msg, 'data': {'results': results}})
+        ok, msg, data = send_test_notification(int(user_id), accept)
+        return jsonify({'code': 1 if ok else 0, 'msg': msg, 'data': data})
     except Exception as e:
         logger.error(f"test_notification_settings failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 @user_blp.route('/change-password', methods=['POST'])
 @login_required
 def change_password():
-    """
-    Change current user's password.
-    
-    Request body:
-        old_password: str (required)
-        new_password: str (required)
-    """
+    """Change current user's password."""
     try:
         user_id = getattr(g, 'user_id', None)
         if not user_id:
             return jsonify({'code': 0, 'msg': 'Not authenticated', 'data': None}), 401
-        
         data = request.get_json() or {}
-        old_password = data.get('old_password', '')
-        new_password = data.get('new_password', '')
-        
-        if not new_password:
-            return jsonify({'code': 0, 'msg': 'New password required', 'data': None}), 400
-        
-        if len(new_password) < 6:
-            return jsonify({'code': 0, 'msg': 'New password must be at least 6 characters', 'data': None}), 400
-        
-        # Check if user has a password set
-        user_service = get_user_service()
-        user = user_service.get_user_by_id(user_id)
-        if not user:
-            return jsonify({'code': 0, 'msg': 'User not found', 'data': None}), 404
-        
-        # Get password_hash to check if user has no password
-        from app.utils.db import get_db_connection
-        with get_db_connection() as db:
-            cur = db.cursor()
-            cur.execute("SELECT password_hash FROM qd_users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            cur.close()
-        
-        password_hash = row.get('password_hash', '') if row else ''
-        has_password = password_hash and password_hash.strip() != ''
-        
-        # If user has no password, allow setting password without old password
-        if not has_password:
-            if not old_password:
-                # No old password required for users without password
-                success = user_service.reset_password(user_id, new_password)
-                if success:
-                    return jsonify({'code': 1, 'msg': 'Password set successfully', 'data': None})
-                else:
-                    return jsonify({'code': 0, 'msg': 'Failed to set password', 'data': None}), 500
-            else:
-                # If old_password is provided but user has no password, ignore it
-                success = user_service.reset_password(user_id, new_password)
-                if success:
-                    return jsonify({'code': 1, 'msg': 'Password set successfully', 'data': None})
-                else:
-                    return jsonify({'code': 0, 'msg': 'Failed to set password', 'data': None}), 500
-        else:
-            # User has existing password, require old password verification
-            if not old_password:
-                return jsonify({'code': 0, 'msg': 'Old password required', 'data': None}), 400
-            
-            success = user_service.change_password(user_id, old_password, new_password)
-            
-            if success:
-                return jsonify({'code': 1, 'msg': 'Password changed successfully', 'data': None})
-            else:
-                return jsonify({'code': 0, 'msg': 'Old password incorrect', 'data': None}), 400
+        ok, msg, status = change_user_password(
+            int(user_id),
+            data.get('old_password', ''),
+            data.get('new_password', ''),
+        )
+        return jsonify({'code': 1 if ok else 0, 'msg': msg, 'data': None}), status if not ok else 200
     except ValueError as e:
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 400
     except Exception as e:
         logger.error(f"change_password failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
-
-
 # ==================== System Overview (Admin) ====================
 
 def _safe_json_loads(s, default=None):
@@ -1251,7 +957,7 @@ def get_system_strategies():
         page: int (default 1)
         page_size: int (default 20, max 100)
         status: str (optional, filter by status: running/stopped/all)
-        execution_mode: str (optional, live/signal — omit or all for any)
+        execution_mode: str (optional, live/signal; omit or all for any)
         search: str (optional, search by strategy name/symbol/username/id)
         strategy_id: int (optional, exact strategy id)
         user_id: int (optional, exact owner user id)
@@ -1436,7 +1142,7 @@ def get_system_strategies():
 
             cur.close()
 
-        # Build response — batch-resolve exchange names for credential_id-only configs.
+        # Build response; batch-resolve exchange names for credential_id-only configs.
         cred_ids = set()
         for s in strategies:
             ec = _safe_json_loads(s.get('exchange_config'), {})
@@ -1500,7 +1206,7 @@ def get_system_strategies():
                 cs_type = trading_config.get('cs_strategy_type') or 'single'
                 symbol_list = trading_config.get('symbol_list') or []
 
-            # Timestamps are emitted as UTC ISO by SafeJSONProvider — pass
+            # Timestamps are emitted as UTC ISO by SafeJSONProvider; pass
             # datetime objects straight through.
             created_at = s.get('created_at')
             updated_at = s.get('updated_at')
@@ -1634,7 +1340,7 @@ def admin_toggle_system_strategy():
 
     Query/body:
         id / strategy_id: strategy primary key
-        action: optional ``start`` | ``stop`` — omit to toggle current status
+        action: optional ``start`` | ``stop``; omit to toggle current status
     """
     try:
         data = request.get_json(silent=True) or {}
@@ -1692,7 +1398,7 @@ def admin_toggle_system_strategy():
             alive, hint = executor.wait_strategy_running(strategy_id, timeout=3.0)
             if not alive:
                 svc.update_strategy_status(strategy_id, 'stopped')
-                msg = f'策略启动后立即退出: {hint}'
+                msg = f'Strategy executor exited immediately after start: {hint}'
                 return jsonify({
                     'code': 0,
                     'msg': msg,
@@ -1703,8 +1409,27 @@ def admin_toggle_system_strategy():
                 admin_user_id, strategy_id, st.get('user_id'),
             )
         else:
-            executor.stop_strategy(strategy_id)
-            svc.update_strategy_status(strategy_id, 'stopped')
+            status_ok = svc.update_strategy_status(strategy_id, 'stopped')
+            if not status_ok:
+                return jsonify({
+                    'code': 0,
+                    'msg': 'Failed to persist stopped status; strategy may resume on restart',
+                    'data': None,
+                }), 500
+            executor_ok = executor.stop_strategy(strategy_id, persist_status=False)
+            if not executor_ok:
+                return jsonify({
+                    'code': 0,
+                    'msg': 'Stopped status was saved, but runtime thread stop failed; please refresh and retry',
+                    'data': {'id': strategy_id, 'status': 'stopped'},
+                }), 500
+            latest = svc.get_strategy(strategy_id)
+            if not latest or str(latest.get('status') or '').strip().lower() != 'stopped':
+                return jsonify({
+                    'code': 0,
+                    'msg': 'Stop verification failed; strategy status is not stopped',
+                    'data': {'id': strategy_id, 'status': latest.get('status') if latest else None},
+                }), 500
             logger.info(
                 'Admin %s stopped strategy %s (owner user_id=%s)',
                 admin_user_id, strategy_id, st.get('user_id'),
@@ -1722,6 +1447,50 @@ def admin_toggle_system_strategy():
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 
+@user_blp.route('/system-strategies/delete', methods=['DELETE'])
+@login_required
+@admin_required
+def admin_delete_system_strategy():
+    """Delete any strategy from the system overview (admin only)."""
+    try:
+        strategy_id = request.args.get('id', type=int)
+        if not strategy_id:
+            data = request.get_json(silent=True) or {}
+            try:
+                strategy_id = int(data.get('strategy_id') or data.get('id') or 0)
+            except (TypeError, ValueError):
+                strategy_id = 0
+        if strategy_id <= 0:
+            return jsonify({'code': 0, 'msg': 'Missing strategy id', 'data': None}), 400
+
+        from app import get_trading_executor
+        from app.routes.strategy import get_strategy_service
+
+        svc = get_strategy_service()
+        st = svc.get_strategy(strategy_id)
+        if not st:
+            return jsonify({'code': 0, 'msg': 'Strategy not found', 'data': None}), 404
+
+        if str(st.get('status') or '').strip().lower() == 'running':
+            svc.update_strategy_status(strategy_id, 'stopped')
+            get_trading_executor().stop_strategy(strategy_id, persist_status=False)
+
+        ok = svc.delete_strategy(strategy_id)
+        if not ok:
+            return jsonify({'code': 0, 'msg': 'Failed to delete strategy', 'data': None}), 500
+
+        logger.info(
+            'Admin %s deleted strategy %s (owner user_id=%s)',
+            getattr(g, 'user_id', None), strategy_id, st.get('user_id'),
+        )
+        return jsonify({'code': 1, 'msg': 'Deleted successfully', 'data': {'id': strategy_id}})
+    except Exception as e:
+        logger.error(f"admin_delete_system_strategy failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
 # ==================== Admin Orders ====================
 
 
@@ -1731,7 +1500,7 @@ def _ensure_usdt_admin_columns():
     on PostgreSQL, so this is effectively a no-op after the first hit.
 
     Failures are swallowed (logged at debug level) so a running DB user
-    without DDL privileges doesn't block the read paths — the SELECTs
+    without DDL privileges doesn't block the read paths; the SELECTs
     further down use ``information_schema`` checks or COALESCE to tolerate
     the columns being absent.
     """
@@ -1928,7 +1697,7 @@ def manual_confirm_order(order_id: int):
         - Stamps tx_hash + paid_at (if empty) + confirmed_at + admin_note
           + manual_confirmed_by + matched_via='manual_admin'.
         - Calls ``purchase_membership`` exactly once per order (idempotent
-          on re-submit — already-confirmed orders only refresh the audit
+          on re-submit; already-confirmed orders only refresh the audit
           fields, no double-grant).
         - Refuses ``status='cancelled'`` orders so the admin doesn't
           accidentally resurrect a deliberately-cancelled refund.
@@ -1946,10 +1715,15 @@ def manual_confirm_order(order_id: int):
         if len(note) > 1000:
             return jsonify({'code': 0, 'msg': 'note_too_long', 'data': None}), 400
 
+        from app.services.billing_service import get_billing_service
+        billing = get_billing_service()
+        if not billing.is_billing_enabled():
+            return jsonify({'code': 0, 'msg': 'billing_disabled', 'data': None}), 403
+
         _ensure_usdt_admin_columns()
 
         # Load order in a short read txn (don't hold a lock across the
-        # billing call below — purchase_membership opens its own conn).
+        # billing call below; purchase_membership opens its own conn).
         with get_db_connection() as db:
             cur = db.cursor()
             cur.execute(
@@ -1970,7 +1744,7 @@ def manual_confirm_order(order_id: int):
         plan = order.get('plan')
 
         if current_status == 'cancelled':
-            # Cancelled orders are deliberately retired — surfacing this
+            # Cancelled orders are deliberately retired; surfacing this
             # as an error forces the admin to recreate the order instead
             # of silently rescuing a refunded one.
             return jsonify({
@@ -2005,13 +1779,11 @@ def manual_confirm_order(order_id: int):
             cur.close()
 
         # Grant membership only when transitioning into 'confirmed' for
-        # the first time — re-submits (already confirmed) should only
+        # the first time; re-submits (already confirmed) should only
         # update the audit fields above, never grant another membership.
         billing_msg = ''
         if not already_confirmed:
             try:
-                from app.services.billing_service import get_billing_service
-                billing = get_billing_service()
                 ok, billing_msg, _ = billing.purchase_membership(
                     int(user_id),
                     str(plan),
@@ -2116,6 +1888,27 @@ def get_admin_ai_stats():
                 cur = db.cursor()  # re-create cursor after rollback
                 memory_summary = {}
 
+            copilot_summary = {}
+            try:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) AS total_sessions,
+                        COUNT(DISTINCT user_id) AS unique_chat_users
+                    FROM qd_ai_copilot_sessions
+                """)
+                copilot_summary = cur.fetchone() or {}
+                cur.execute("""
+                    SELECT COUNT(*) AS total_messages
+                    FROM qd_ai_copilot_messages
+                """)
+                copilot_message_summary = cur.fetchone() or {}
+                copilot_summary['total_messages'] = int(copilot_message_summary.get('total_messages') or 0)
+            except Exception as chat_err:
+                logger.warning(f"qd_ai_copilot summary query failed (table may not exist): {chat_err}")
+                db.rollback()
+                cur = db.cursor()
+                copilot_summary = {}
+
             # --- Per-user stats ---
             # Build WHERE clause for user search (applied after JOIN)
             user_where_clause = ""
@@ -2163,6 +1956,7 @@ def get_admin_ai_stats():
             # Get per-user analysis_memory stats (correct/helpful counts)
             user_ids = [r['user_id'] for r in user_rows if r.get('user_id')]
             memory_stats_map = {}
+            copilot_stats_map = {}
             if user_ids:
                 try:
                     placeholders = ','.join(['?'] * len(user_ids))
@@ -2194,6 +1988,33 @@ def get_admin_ai_stats():
                     db.rollback()
                     cur = db.cursor()  # re-create cursor after rollback
                     memory_stats_map = {}
+                try:
+                    placeholders = ','.join(['?'] * len(user_ids))
+                    cur.execute(
+                        f"""
+                        SELECT
+                            s.user_id,
+                            COUNT(DISTINCT s.id) AS chat_session_count,
+                            COUNT(m.id) AS chat_message_count,
+                            MAX(s.updated_at) AS last_chat_at
+                        FROM qd_ai_copilot_sessions s
+                        LEFT JOIN qd_ai_copilot_messages m ON m.session_id = s.id
+                        WHERE s.user_id IN ({placeholders})
+                        GROUP BY s.user_id
+                        """,
+                        tuple(user_ids)
+                    )
+                    for row in (cur.fetchall() or []):
+                        copilot_stats_map[row['user_id']] = {
+                            'chat_session_count': int(row.get('chat_session_count') or 0),
+                            'chat_message_count': int(row.get('chat_message_count') or 0),
+                            'last_chat_at': row.get('last_chat_at')
+                        }
+                except Exception as chat_err:
+                    logger.warning(f"qd_ai_copilot per-user query failed: {chat_err}")
+                    db.rollback()
+                    cur = db.cursor()
+                    copilot_stats_map = {}
 
             # Get recent analysis records (last 50)
             # Ensure we get user info even if user_id is NULL or user doesn't exist
@@ -2220,6 +2041,39 @@ def get_admin_ai_stats():
             )
             recent_rows = cur.fetchall() or []
 
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        s.id,
+                        s.user_id,
+                        COALESCE(u.username, '') AS username,
+                        COALESCE(u.nickname, '') AS nickname,
+                        COALESCE(u.email, '') AS email,
+                        s.title,
+                        s.context_market,
+                        s.context_symbol,
+                        s.created_at,
+                        s.updated_at,
+                        COUNT(m.id) AS message_count
+                    FROM qd_ai_copilot_sessions s
+                    LEFT JOIN qd_users u ON u.id = s.user_id
+                    LEFT JOIN qd_ai_copilot_messages m ON m.session_id = s.id
+                    WHERE s.user_id IS NOT NULL
+                    GROUP BY s.id, s.user_id, u.username, u.nickname, u.email,
+                             s.title, s.context_market, s.context_symbol,
+                             s.created_at, s.updated_at
+                    ORDER BY s.updated_at DESC
+                    LIMIT 50
+                    """
+                )
+                recent_copilot_rows = cur.fetchall() or []
+            except Exception as chat_err:
+                logger.warning(f"qd_ai_copilot recent query failed: {chat_err}")
+                db.rollback()
+                cur = db.cursor()
+                recent_copilot_rows = []
+
             cur.close()
 
         # Build per-user items
@@ -2232,6 +2086,7 @@ def get_admin_ai_stats():
                 continue
 
             ms = memory_stats_map.get(uid, {})
+            cs = copilot_stats_map.get(uid, {})
             # Server stores naive TIMESTAMP in container TZ; emit UTC ISO so the
             # browser can render it in the user's locale correctly.
             last_at = to_utc_iso(row.get('last_analysis_at'))
@@ -2250,7 +2105,10 @@ def get_admin_ai_stats():
                 'helpful': int(ms.get('helpful', 0)),
                 'not_helpful': int(ms.get('not_helpful', 0)),
                 'last_analysis_at': last_at,
-                'first_analysis_at': first_at
+                'first_analysis_at': first_at,
+                'chat_session_count': int(cs.get('chat_session_count', 0)),
+                'chat_message_count': int(cs.get('chat_message_count', 0)),
+                'last_chat_at': to_utc_iso(cs.get('last_chat_at'))
             })
 
         # Build recent records
@@ -2277,6 +2135,25 @@ def get_admin_ai_stats():
                 'completed_at': completed_at
             })
 
+        recent_copilot_items = []
+        for row in recent_copilot_rows:
+            user_id = row.get('user_id')
+            if not user_id:
+                continue
+            recent_copilot_items.append({
+                'id': int(row.get('id') or 0),
+                'user_id': int(user_id),
+                'username': str(row.get('username') or ''),
+                'nickname': str(row.get('nickname') or ''),
+                'email': str(row.get('email') or ''),
+                'title': str(row.get('title') or ''),
+                'market': str(row.get('context_market') or ''),
+                'symbol': str(row.get('context_symbol') or ''),
+                'message_count': int(row.get('message_count') or 0),
+                'created_at': to_utc_iso(row.get('created_at')),
+                'updated_at': to_utc_iso(row.get('updated_at'))
+            })
+
         return jsonify({
             'code': 1,
             'msg': 'success',
@@ -2286,6 +2163,7 @@ def get_admin_ai_stats():
                 'page': page,
                 'page_size': page_size,
                 'recent': recent_items,
+                'recent_copilot': recent_copilot_items,
                 'summary': {
                     'total_analyses': int(task_summary.get('total_tasks') or 0),
                     'unique_users': int(task_summary.get('unique_users') or 0),
@@ -2295,7 +2173,10 @@ def get_admin_ai_stats():
                     'correct_count': int(memory_summary.get('correct_count') or 0),
                     'incorrect_count': int(memory_summary.get('incorrect_count') or 0),
                     'helpful_count': int(memory_summary.get('helpful_count') or 0),
-                    'not_helpful_count': int(memory_summary.get('not_helpful_count') or 0)
+                    'not_helpful_count': int(memory_summary.get('not_helpful_count') or 0),
+                    'total_copilot_sessions': int(copilot_summary.get('total_sessions') or 0),
+                    'total_copilot_messages': int(copilot_summary.get('total_messages') or 0),
+                    'unique_chat_users': int(copilot_summary.get('unique_chat_users') or 0)
                 }
             }
         })
@@ -2329,3 +2210,5 @@ def get_admin_user_stats():
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 # openapi-compat: legacy import name
 user_bp = user_blp
+
+

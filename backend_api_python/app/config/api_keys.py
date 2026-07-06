@@ -5,7 +5,7 @@ All third-party keys should be provided via environment variables (recommended: 
 import os
 
 class MetaAPIKeys(type):
-    """API Keys 元类，用于支持类属性的动态获取"""
+    """Metaclass that supports dynamic class-level API key lookup."""
     
     @property
     def FINNHUB_API_KEY(cls):
@@ -48,6 +48,46 @@ class MetaAPIKeys(type):
             return env_val
         from app.utils.config_loader import load_addon_config
         val = load_addon_config().get('adanos', {}).get('api_key')
+        return val if val else ''
+
+    @property
+    def FRED_API_KEY(cls):
+        """FRED API key for US macro time series."""
+        env_val = os.getenv('FRED_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('fred', {}).get('api_key')
+        return val if val else ''
+
+    @property
+    def BLS_API_KEY(cls):
+        """Optional BLS registration key for official US labor/CPI data."""
+        env_val = os.getenv('BLS_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('bls', {}).get('api_key')
+        return val if val else ''
+
+    @property
+    def BEA_API_KEY(cls):
+        """BEA API key for official US national accounts data."""
+        env_val = os.getenv('BEA_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('bea', {}).get('api_key')
+        return val if val else ''
+
+    @property
+    def ALPHA_VANTAGE_API_KEY(cls):
+        """Alpha Vantage key for NEWS_SENTIMENT company news data."""
+        env_val = os.getenv('ALPHA_VANTAGE_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('alpha_vantage', {}).get('api_key')
         return val if val else ''
     
     @property
@@ -186,18 +226,17 @@ class MetaAPIKeys(type):
 
 
 class APIKeys(metaclass=MetaAPIKeys):
-    """API 密钥配置类"""
+    """API key configuration."""
     
     @classmethod
     def get(cls, key_name: str, default: str = '') -> str:
-        """获取 API 密钥"""
-        # 尝试从类属性获取
+        """Return an API key by name."""
         if hasattr(cls, key_name):
             return getattr(cls, key_name)
         return default
     
     @classmethod
     def is_configured(cls, key_name: str) -> bool:
-        """检查 API 密钥是否已配置"""
+        """Return whether an API key is configured."""
         value = cls.get(key_name)
         return bool(value and value.strip())

@@ -1,13 +1,4 @@
-"""
-Fast Analysis Service 3.0
-系统性重构版本 - 使用统一的数据采集器
-
-核心改进：
-1. 数据源统一 - 使用 MarketDataCollector，与K线模块、自选列表完全一致
-2. 宏观数据 - 新增美元指数、VIX、利率等宏观经济指标
-3. 多维新闻 - 使用结构化API，无需深度阅读
-4. 单次LLM调用 - 强约束prompt，输出结构化分析
-"""
+"""Fast analysis orchestration built on the shared market-data collector."""
 import json
 import os
 import re
@@ -18,169 +9,14 @@ from decimal import Decimal, ROUND_HALF_UP
 from app.utils.logger import get_logger
 from app.services.llm import LLMService
 from app.services.market_data_collector import get_market_data_collector
+from app.services.fast_analysis_formatters import build_trend_outlook_summary, safe_float_price
+from app.services.fast_analysis_geo import (
+    geopolitical_match_level,
+    geopolitical_sentiment_penalty_delta,
+    is_major_geopolitical_news_text,
+)
 
 logger = get_logger(__name__)
-
-
-def _safe_float_price(value: Any, default: Optional[float] = None) -> Optional[float]:
-    """Coerce LLM/string prices to float; invalid -> default."""
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        if isinstance(value, float) and (value != value):  # NaN
-            return default
-        return float(value)
-    try:
-        s = str(value).strip().replace(",", "")
-        if not s:
-            return default
-        return float(s)
-    except (TypeError, ValueError):
-        return default
-
-
-def _build_trend_outlook_summary(trend_outlook: Dict[str, Any], language: str) -> str:
-    """Human-readable multi-horizon outlook for API / legacy clients."""
-    if not trend_outlook:
-        return ""
-    is_zh = str(language or "").lower().startswith("zh")
-
-    def _lbl(trend: str) -> str:
-        t = str(trend or "HOLD").upper()
-        if is_zh:
-            return {"BUY": "看多", "SELL": "看空", "HOLD": "震荡/中性"}.get(t, "震荡/中性")
-        return {"BUY": "bullish", "SELL": "bearish", "HOLD": "neutral / range"}.get(t, "neutral / range")
-
-    n24 = trend_outlook.get("next_24h") or {}
-    d3 = trend_outlook.get("next_3d") or {}
-    w1 = trend_outlook.get("next_1w") or {}
-    m1 = trend_outlook.get("next_1m") or {}
-
-    if is_zh:
-        parts = [
-            f"约24小时：{_lbl(n24.get('trend'))}（强度 {n24.get('strength', 'neutral')}）",
-            f"约3天：{_lbl(d3.get('trend'))}（强度 {d3.get('strength', 'neutral')}）",
-            f"约1周：{_lbl(w1.get('trend'))}（强度 {w1.get('strength', 'neutral')}）",
-            f"约1月：{_lbl(m1.get('trend'))}（强度 {m1.get('strength', 'neutral')}）",
-        ]
-        return "；".join(parts)
-    parts = [
-        f"~24h: {_lbl(n24.get('trend'))} ({n24.get('strength', 'neutral')})",
-        f"~3d: {_lbl(d3.get('trend'))} ({d3.get('strength', 'neutral')})",
-        f"~1w: {_lbl(w1.get('trend'))} ({w1.get('strength', 'neutral')})",
-        f"~1m: {_lbl(m1.get('trend'))} ({m1.get('strength', 'neutral')})",
-    ]
-    return " | ".join(parts)
-
-
-# -----------------------------------------------------------------------------
-# Geopolitical / major-conflict detection (word boundaries + tiers)
-# Avoid false positives: "war" in "toward/award", "tension" in "extension",
-# "us" in "focus/status", bare country names without conflict context, etc.
-# -----------------------------------------------------------------------------
-_GEO_SEVERE_PATTERNS: List[re.Pattern] = [
-    re.compile(r"\b(?:war|wars|warfare|wartime)\b", re.I),
-    re.compile(r"\b(?:invasion|invaded|invading|invade)\b", re.I),
-    re.compile(r"\b(?:airstrike|air\s*strikes?|missile\s+strike|drone\s+strike)\b", re.I),
-    re.compile(r"\b(?:military\s+attack|armed\s+attack|troops?\s+(?:fire|attack|invade))\b", re.I),
-    re.compile(r"\b(?:declare[sd]?\s+war|state\s+of\s+war|act\s+of\s+war)\b", re.I),
-    re.compile(r"\b(?:martial\s+law|military\s+coup|coup\s+d['\u2019]?etat)\b", re.I),
-    re.compile(r"\b(?:terror(?:ist)?\s+attack|mass\s+shooting\s+at)\b", re.I),
-]
-_GEO_MODERATE_PATTERNS: List[re.Pattern] = [
-    re.compile(r"\bgeopolitical\b", re.I),
-    re.compile(r"\b(?:armed|military)\s+conflict\b", re.I),
-    re.compile(r"\b(?:international\s+)?sanctions?\s+(?:on|against|targeting|hit)\b", re.I),
-    re.compile(r"\b(?:naval\s+blockade|border\s+clash|ceasefire\s+(?:broken|violated))\b", re.I),
-    re.compile(r"\b(?:evacuat\w+\s+(?:the\s+)?embassy|embassy\s+evacuation)\b", re.I),
-    re.compile(r"\b(?:nuclear\s+(?:threat|strike|weapon)|nuclear\s+war)\b", re.I),
-]
-# "Crisis" / "tension" only in clearly geopolitical phrases (not substring of "extension")
-_GEO_CONTEXT_MODERATE: List[re.Pattern] = [
-    re.compile(r"\b(?:geopolitical|diplomatic|border)\s+(?:crisis|tension|standoff)\b", re.I),
-    re.compile(r"\b(?:tensions?\s+(?:rise|escalat|flare|mount)\s+(?:with|between))\b", re.I),
-    re.compile(r"\b(?:middle\s+east|south\s+china\s+sea|taiwan\s+strait)\s+(?:crisis|tension|conflict)\b", re.I),
-]
-_GEO_ZH_SEVERE = (
-    "宣战", "战争爆发", "全面战争", "武装冲突", "军事打击", "军事入侵", "空袭", "导弹袭击",
-    "开战", "交火", "战火",
-)
-_GEO_ZH_MODERATE = (
-    "地缘政治危机", "国际制裁升级", "断交", "撤侨", "军事对峙", "地区冲突升级",
-)
-
-# Optional: country/region + conflict verb (single pattern, avoids "NYSE" noise)
-_GEO_REGION_CONFLICT: List[re.Pattern] = [
-    re.compile(
-        r"\b(?:russia|ukraine|iran|israel|gaza|hamas|taiwan|north\s+korea|dprk|"
-        r"syria|yemen|lebanon|nato)\b.{0,40}\b(?:invade|attack|strike|war|conflict|sanction)\b",
-        re.I,
-    ),
-    re.compile(
-        r"\b(?:invade|attack|strike|war|conflict|sanction)\b.{0,40}\b(?:russia|ukraine|iran|israel|"
-        r"gaza|hamas|taiwan|north\s+korea|dprk|syria|nato)\b",
-        re.I,
-    ),
-]
-
-_GEO_MAJOR_NEWS_SEVERE = [
-    re.compile(r"\b(?:war|wars|warfare)\b", re.I),
-    re.compile(r"\b(?:invasion|invaded|military\s+attack|airstrike)\b", re.I),
-    re.compile(r"\b(?:armed\s+conflict|military\s+conflict)\b", re.I),
-]
-
-
-def _geopolitical_match_level(combined_text: str) -> Tuple[str, Optional[str]]:
-    """
-    Returns (level, reason_tag) where level is 'none'|'severe'|'moderate'.
-    combined_text: title + summary (original case OK; English patterns use lower via regex I flag).
-    """
-    if not combined_text or len(combined_text.strip()) < 4:
-        return "none", None
-    low = combined_text.lower()
-    for pat in _GEO_SEVERE_PATTERNS:
-        if pat.search(low):
-            return "severe", pat.pattern[:48]
-    for z in _GEO_ZH_SEVERE:
-        if z in combined_text:
-            return "severe", z
-    for pat in _GEO_REGION_CONFLICT:
-        if pat.search(low):
-            return "severe", "region+conflict"
-    for pat in _GEO_MODERATE_PATTERNS:
-        if pat.search(low):
-            return "moderate", pat.pattern[:48]
-    for pat in _GEO_CONTEXT_MODERATE:
-        if pat.search(low):
-            return "moderate", pat.pattern[:48]
-    for z in _GEO_ZH_MODERATE:
-        if z in combined_text:
-            return "moderate", z
-    return "none", None
-
-
-def _geopolitical_sentiment_penalty_delta(level: str) -> int:
-    if level == "severe":
-        return -42
-    if level == "moderate":
-        return -18
-    return 0
-
-
-def _is_major_geopolitical_news_text(combined_text: str) -> bool:
-    """Stricter than sentiment: only clear conflict / war signals for _has_major_news."""
-    if not combined_text:
-        return False
-    low = combined_text.lower()
-    for pat in _GEO_MAJOR_NEWS_SEVERE:
-        if pat.search(low):
-            return True
-    for z in _GEO_ZH_SEVERE:
-        if z in combined_text:
-            return True
-    if any(p.search(low) for p in _GEO_REGION_CONFLICT):
-        return True
-    return False
 
 
 class FastAnalysisService:
@@ -747,7 +583,6 @@ IMPORTANT:
         
         lines = []
         
-        # 资产负债表
         if 'balance_sheet' in statements:
             bs = statements['balance_sheet']
             lines.append("资产负债表 (Balance Sheet):")
@@ -765,7 +600,6 @@ IMPORTANT:
                 current_ratio = bs['current_assets'] / bs['current_liabilities'] if bs['current_liabilities'] > 0 else 0
                 lines.append(f"  - 流动比率: {current_ratio:.2f}")
         
-        # 利润表
         if 'income_statement' in statements:
             is_stmt = statements['income_statement']
             lines.append("利润表 (Income Statement):")
@@ -780,7 +614,6 @@ IMPORTANT:
             if is_stmt.get('eps'):
                 lines.append(f"  - 每股收益: ${is_stmt['eps']:.2f}")
         
-        # 现金流量表
         if 'cash_flow' in statements:
             cf = statements['cash_flow']
             lines.append("现金流量表 (Cash Flow):")
@@ -798,7 +631,6 @@ IMPORTANT:
         
         lines = []
         
-        # 历史盈利
         if 'history' in earnings and earnings['history']:
             lines.append("历史盈利 (Earnings History):")
             for i, hist in enumerate(earnings['history'][:4], 1):
@@ -816,7 +648,6 @@ IMPORTANT:
                         line += f", 超预期={surprise_str}"
                     lines.append(line)
         
-        # 未来盈利
         if 'upcoming' in earnings:
             upcoming = earnings['upcoming']
             if upcoming.get('next_earnings_date'):
@@ -826,7 +657,6 @@ IMPORTANT:
                 if upcoming.get('revenue_estimate'):
                     lines.append(f"  - 收入预期: ${upcoming['revenue_estimate']:,.0f}")
         
-        # 季度盈利
         if 'quarterly' in earnings:
             q = earnings['quarterly']
             if q.get('latest_quarter'):
@@ -845,19 +675,16 @@ IMPORTANT:
         
         lines = []
         
-        # 美元指数
         if 'DXY' in macro:
             dxy = macro['DXY']
             direction = "↑" if dxy.get('change', 0) > 0 else "↓"
             lines.append(f"- {dxy.get('name', 'USD Index')}: {dxy.get('price', 'N/A')} ({direction}{abs(dxy.get('changePercent', 0)):.2f}%)")
-            # 美元强弱对不同资产的影响
             if market == 'Crypto':
                 impact = "利空加密货币" if dxy.get('change', 0) > 0 else "利好加密货币"
                 lines.append(f"  ⚠️ 美元{direction} {impact}")
             elif market == 'Forex':
                 lines.append(f"  ⚠️ 美元{direction} 直接影响外汇走势")
         
-        # VIX恐慌指数
         if 'VIX' in macro:
             vix = macro['VIX']
             vix_value = vix.get('price', 0)
@@ -871,7 +698,6 @@ IMPORTANT:
                 level = "低波动 (<15)"
             lines.append(f"- {vix.get('name', 'VIX')}: {vix_value:.2f} - {level}")
         
-        # 美债收益率
         if 'TNX' in macro:
             tnx = macro['TNX']
             direction = "↑" if tnx.get('change', 0) > 0 else "↓"
@@ -879,19 +705,16 @@ IMPORTANT:
             if tnx.get('price', 0) > 4.5:
                 lines.append("  ⚠️ 高利率环境，对估值不利")
         
-        # 黄金
         if 'GOLD' in macro:
             gold = macro['GOLD']
             direction = "↑" if gold.get('change', 0) > 0 else "↓"
             lines.append(f"- {gold.get('name', 'Gold')}: ${gold.get('price', 'N/A'):.2f} ({direction}{abs(gold.get('changePercent', 0)):.2f}%)")
         
-        # 标普500
         if 'SPY' in macro:
             spy = macro['SPY']
             direction = "↑" if spy.get('change', 0) > 0 else "↓"
             lines.append(f"- {spy.get('name', 'S&P 500')}: ${spy.get('price', 'N/A'):.2f} ({direction}{abs(spy.get('changePercent', 0)):.2f}%)")
         
-        # 比特币 (作为风险指标)
         if 'BTC' in macro and market != 'Crypto':
             btc = macro['BTC']
             direction = "↑" if btc.get('change', 0) > 0 else "↓"
@@ -939,8 +762,6 @@ IMPORTANT:
             logger.info(f"Fast analysis starting: {market}:{symbol}")
 
             # Consensus timeframes:
-            # - 默认：用用户传入的 timeframe 作为主周期，再加一个上层周期（1D/4H）提升稳定性
-            # - 也允许通过 env 覆盖（逗号分隔），例如 AI_ANALYSIS_CONSENSUS_TIMEFRAMES=1D,4H
             env_tfs = os.getenv("AI_ANALYSIS_CONSENSUS_TIMEFRAMES", "").strip()
             if env_tfs:
                 consensus_timeframes = [t.strip() for t in env_tfs.split(",") if t.strip()]
@@ -1137,16 +958,13 @@ IMPORTANT:
             # Validate we have essential data - with fallback to indicators
             current_price = None
             
-            # 优先从 price 数据获取
             if data.get("price") and data["price"].get("price"):
                 current_price = data["price"]["price"]
             
-            # Fallback: 从 indicators 获取 (如果 K 线成功计算了)
             if not current_price and data.get("indicators"):
                 current_price = data["indicators"].get("current_price")
                 if current_price:
                     logger.info(f"Using price from indicators: ${current_price}")
-                    # 构建简化的 price 数据
                     data["price"] = {
                         "price": current_price,
                         "change": 0,
@@ -1154,7 +972,6 @@ IMPORTANT:
                         "source": "indicators_fallback"
                     }
             
-            # Fallback: 从 kline 最后一根获取
             if not current_price and data.get("kline"):
                 klines = data["kline"]
                 if klines and len(klines) > 0:
@@ -1293,7 +1110,7 @@ IMPORTANT:
                     "strength": _trend_strength(score_1m),
                 },
             }
-            trend_outlook_summary = _build_trend_outlook_summary(trend_outlook, language)
+            trend_outlook_summary = build_trend_outlook_summary(trend_outlook, language)
 
             # Consensus confidence:
             consensus_conf = int(max(40, min(98, 50 + consensus_abs * 0.35)))
@@ -1439,13 +1256,11 @@ IMPORTANT:
                     "take_profit": analysis.get("take_profit"),
                     "position_size_pct": analysis.get("position_size_pct", 10),
                     "timeframe": analysis.get("timeframe", "medium"),
-                    # camelCase + 语义别名：供私有前端/旧版组件绑定（勿用 indicators.trading_levels 充当计划）
                     "entryPrice": analysis.get("entry_price"),
                     "stopLoss": analysis.get("stop_loss"),
                     "takeProfit": analysis.get("take_profit"),
                     "positionSizePct": analysis.get("position_size_pct", 10),
                     "decision": str(analysis.get("decision", "HOLD") or "HOLD").upper(),
-                    # 与 stop_loss / take_profit 数值相同；命名强调「亏损离场 / 盈利目标」避免与多单参考线混淆
                     "loss_exit_price": analysis.get("stop_loss"),
                     "profit_target_price": analysis.get("take_profit"),
                 },
@@ -1502,7 +1317,6 @@ IMPORTANT:
         ma_trend_low = str(ma_trend or "").lower()
         bearish_guidance_context = bool("downtrend" in ma_trend_low or macd_signal == "bearish")
         
-        # RSI 指导 - 更积极地识别做空机会
         if rsi_value > 70:
             guidance_parts.append("🔴 RSI > 70 (超买): 强烈建议SELL做空，避免BUY")
         elif rsi_value > 60:
@@ -1514,7 +1328,6 @@ IMPORTANT:
         else:
             guidance_parts.append("⚪ RSI 40-60 (中性): 技术面中性，需要结合其他指标判断")
         
-        # MACD 指导 - 明确做空信号
         if macd_signal == "bullish":
             guidance_parts.append("🟢 MACD 看涨: 支持BUY做多")
         elif macd_signal == "bearish":
@@ -1522,7 +1335,6 @@ IMPORTANT:
         else:
             guidance_parts.append("⚪ MACD 中性: 无明显方向")
         
-        # MA 趋势指导 - 识别趋势反转机会
         if "uptrend" in ma_trend.lower() or "strong_uptrend" in ma_trend.lower():
             if rsi_value > 60:
                 guidance_parts.append("⚠️ 均线向上但RSI超买: 可能接近顶部，考虑SELL做空")
@@ -1533,13 +1345,11 @@ IMPORTANT:
         else:
             guidance_parts.append("⚪ 均线横盘: 趋势不明确")
         
-        # 24小时涨跌幅指导 - 识别过度波动
         if change_24h > 5:
             guidance_parts.append("🔴 24h涨幅 > 5%: 可能已过度上涨，建议SELL做空或获利了结")
         elif change_24h < -5:
             guidance_parts.append("🟢 24h跌幅 > 5%: 可能已过度下跌，可以考虑BUY做多")
         
-        # 综合建议
         sell_signals = sum([
             rsi_value > 60,
             macd_signal == "bearish",
@@ -1575,7 +1385,6 @@ IMPORTANT:
         if not news_data:
             return False
 
-        # 子串关键词（较长词或中文，避免过短英文误匹配）
         major_keywords = [
             "regulation", "regulatory", "approval", "policy", "government", "central bank",
             "监管", "禁令", "批准", "政策", "政府", "央行",
@@ -1584,7 +1393,6 @@ IMPORTANT:
             "sanctions", "embargo", "制裁", "中东", "海湾", "北约",
             "united states", "middle east",
         ]
-        # 短英文词用词边界匹配（不用裸子串）
         major_short_patterns = [
             re.compile(r"\b(?:ban|banned|banning)\b", re.I),
             re.compile(r"\b(?:crisis|crises)\b", re.I),
@@ -1598,7 +1406,7 @@ IMPORTANT:
             text_to_check = f"{title} {summary}"
             low = text_to_check.lower()
 
-            if _is_major_geopolitical_news_text(text_to_check):
+            if is_major_geopolitical_news_text(text_to_check):
                 logger.info(f"Detected major geopolitical event in news: {low[:80]}")
                 return True
 
@@ -1619,21 +1427,18 @@ IMPORTANT:
         if not macro_data:
             return False
         
-        # 检查VIX（恐慌指数）
         if "VIX" in macro_data:
             vix = macro_data["VIX"]
             vix_value = vix.get("price", 0)
             if vix_value > 30:  # VIX > 30 表示极度恐慌
                 return True
         
-        # 检查DXY大幅波动（>1%）
         if "DXY" in macro_data:
             dxy = macro_data["DXY"]
             change_pct = abs(dxy.get("changePercent", 0))
             if change_pct > 1.0:  # 美元指数波动超过1%
                 return True
         
-        # 检查利率变化（对股票和加密货币影响大）
         if "TNX" in macro_data and market in ["USStock", "Crypto"]:
             tnx = macro_data["TNX"]
             change_pct = abs(tnx.get("changePercent", 0))
@@ -1662,8 +1467,8 @@ IMPORTANT:
         eps = max(abs(current_price) * 1e-6, 1e-8)
 
         tl = indicators.get("trading_levels") or {}
-        sl_long = _safe_float_price(tl.get("suggested_stop_loss"))
-        tp_long = _safe_float_price(tl.get("suggested_take_profit"))
+        sl_long = safe_float_price(tl.get("suggested_stop_loss"))
+        tp_long = safe_float_price(tl.get("suggested_take_profit"))
         long_ok = (
             sl_long is not None
             and tp_long is not None
@@ -1684,8 +1489,8 @@ IMPORTANT:
                     analysis["stop_loss"] = round(min(max_price, current_price * 1.05), 6)
                     analysis["take_profit"] = round(max(min_price, current_price * 0.95), 6)
             else:
-                sl_f = _safe_float_price(analysis.get("stop_loss"))
-                tp_f = _safe_float_price(analysis.get("take_profit"))
+                sl_f = safe_float_price(analysis.get("stop_loss"))
+                tp_f = safe_float_price(analysis.get("take_profit"))
                 if sl_f is not None and tp_f is not None and tp_f < current_price < sl_f:
                     analysis["stop_loss"] = round(min(max(sl_f, current_price + eps), max_price), 6)
                     analysis["take_profit"] = round(max(min(tp_f, current_price - eps), min_price), 6)
@@ -1699,8 +1504,8 @@ IMPORTANT:
                 analysis["stop_loss"] = round(sl, 6)
                 analysis["take_profit"] = round(tp, 6)
             else:
-                sl_f = _safe_float_price(analysis.get("stop_loss"))
-                tp_f = _safe_float_price(analysis.get("take_profit"))
+                sl_f = safe_float_price(analysis.get("stop_loss"))
+                tp_f = safe_float_price(analysis.get("take_profit"))
                 if sl_f is not None and tp_f is not None and sl_f < current_price < tp_f:
                     analysis["stop_loss"] = round(max(min(sl_f, current_price - eps), min_price), 6)
                     analysis["take_profit"] = round(min(max(tp_f, current_price + eps), max_price), 6)
@@ -1709,8 +1514,8 @@ IMPORTANT:
                     analysis["take_profit"] = round(min(max_price, current_price * 1.05), 6)
 
         # Last-resort: fix inverted or equal levels
-        sl_f = _safe_float_price(analysis.get("stop_loss"), current_price)
-        tp_f = _safe_float_price(analysis.get("take_profit"), current_price)
+        sl_f = safe_float_price(analysis.get("stop_loss"), current_price)
+        tp_f = safe_float_price(analysis.get("take_profit"), current_price)
         if sl_f is None or tp_f is None:
             return analysis
         if decision == "SELL":
@@ -1739,7 +1544,7 @@ IMPORTANT:
         decision = str(analysis.get("decision", "HOLD")).upper()
         
         # Constrain entry price
-        entry = _safe_float_price(analysis.get("entry_price"), current_price)
+        entry = safe_float_price(analysis.get("entry_price"), current_price)
         if entry is not None and (entry < min_price or entry > max_price):
             logger.warning(f"Entry price {entry} out of bounds, constraining to current price {current_price}")
             analysis["entry_price"] = round(current_price, 6)
@@ -1752,8 +1557,8 @@ IMPORTANT:
         if decision == "SELL":
             stop_default = round(current_price * 1.05, 6)
             tp_default = round(current_price * 0.95, 6)
-            stop_loss = _safe_float_price(analysis.get("stop_loss"), stop_default)
-            take_profit = _safe_float_price(analysis.get("take_profit"), tp_default)
+            stop_loss = safe_float_price(analysis.get("stop_loss"), stop_default)
+            take_profit = safe_float_price(analysis.get("take_profit"), tp_default)
             if stop_loss is None or stop_loss <= current_price or stop_loss > max_price:
                 analysis["stop_loss"] = stop_default
             else:
@@ -1765,8 +1570,8 @@ IMPORTANT:
         else:
             stop_default = round(current_price * 0.95, 6)
             tp_default = round(current_price * 1.05, 6)
-            stop_loss = _safe_float_price(analysis.get("stop_loss"), stop_default)
-            take_profit = _safe_float_price(analysis.get("take_profit"), tp_default)
+            stop_loss = safe_float_price(analysis.get("stop_loss"), stop_default)
+            take_profit = safe_float_price(analysis.get("take_profit"), tp_default)
             if stop_loss is None or stop_loss < min_price or stop_loss >= current_price:
                 analysis["stop_loss"] = stop_default
             else:
@@ -1791,7 +1596,6 @@ IMPORTANT:
         else:
             analysis["decision"] = decision
         
-        # 基于技术指标验证决策合理性（允许宏观/新闻因素覆盖）
         if indicators:
             analysis = self._validate_decision_against_indicators(
                 analysis, indicators, confidence, 
@@ -1825,7 +1629,6 @@ IMPORTANT:
         macd_signal = macd_data.get("signal", "neutral")
         ma_trend = ma_data.get("trend", "sideways")
         
-        # 如果置信度太低，强制改为HOLD
         if confidence < 60:
             if decision != "HOLD":
                 logger.warning(f"Decision {decision} with low confidence {confidence}, forcing to HOLD")
@@ -1833,62 +1636,48 @@ IMPORTANT:
                 analysis["confidence"] = max(confidence, 45)  # 降低置信度
             return analysis
         
-        # 如果有重大新闻或宏观事件，允许覆盖技术指标（但记录警告）
         allow_override = has_major_news or has_macro_event
         
-        # 检查BUY决策是否与技术指标矛盾
         if decision == "BUY":
             conflicts = []
             
-            # RSI > 70 时不应该BUY（除非有重大利好）
             if rsi_value > 70:
                 conflicts.append(f"RSI {rsi_value:.1f} > 70 (超买)")
             
-            # MACD看跌时不应该BUY（除非有重大利好）
             if macd_signal == "bearish":
                 conflicts.append("MACD bearish")
             
-            # 均线趋势向下时不应该BUY（除非有重大利好）
-            # 只有当趋势非常强烈时才认为是冲突（避免过于敏感）
             if "strong_downtrend" in ma_trend.lower() or ("downtrend" in ma_trend.lower() and rsi_value > 50):
                 conflicts.append(f"MA trend: {ma_trend}")
             
             if conflicts:
                 if allow_override:
-                    # 允许覆盖，但降低置信度并添加说明
                     logger.info(f"BUY decision conflicts with indicators but major news/macro event allows override: {', '.join(conflicts)}")
                     analysis["confidence"] = max(confidence - 15, 50)
                     original_summary = analysis.get("summary", "")
                     analysis["summary"] = f"{original_summary} [注意：技术指标显示{', '.join(conflicts)}，但重大事件可能改变趋势]"
                 else:
-                    # 没有重大事件，强制改为HOLD
                     logger.warning(f"BUY decision conflicts with indicators and no major event: {', '.join(conflicts)}. Forcing to HOLD")
                     analysis["decision"] = "HOLD"
                     analysis["confidence"] = max(confidence - 20, 40)
                     original_summary = analysis.get("summary", "")
                     analysis["summary"] = f"{original_summary} [注意：技术指标显示{', '.join(conflicts)}，建议观望]"
         
-        # 检查SELL决策是否与技术指标矛盾（放宽限制，因为SELL是有效的做空机会）
         elif decision == "SELL":
             conflicts = []
             
-            # 只有在强烈看涨信号时才阻止SELL（放宽条件）
-            # RSI < 30 且 MACD看涨 且 均线向上时，才认为矛盾
             if rsi_value < 30 and macd_signal == "bullish" and "uptrend" in ma_trend.lower():
                 conflicts.append(f"Strong bullish signals (RSI {rsi_value:.1f} < 30, MACD bullish, uptrend)")
-            # 或者 RSI < 30 且 均线强烈向上
             elif rsi_value < 30 and "strong_uptrend" in ma_trend.lower():
                 conflicts.append(f"Very strong uptrend with oversold RSI {rsi_value:.1f}")
             
             if conflicts:
                 if allow_override:
-                    # 允许覆盖，但降低置信度并添加说明
                     logger.info(f"SELL decision conflicts with strong bullish indicators but major news/macro event allows override: {', '.join(conflicts)}")
                     analysis["confidence"] = max(confidence - 15, 50)
                     original_summary = analysis.get("summary", "")
                     analysis["summary"] = f"{original_summary} [注意：技术指标显示{', '.join(conflicts)}，但重大事件可能改变趋势]"
                 else:
-                    # 只有在非常强烈的看涨信号时才改为HOLD
                     logger.warning(f"SELL decision conflicts with very strong bullish indicators: {', '.join(conflicts)}. Forcing to HOLD")
                     analysis["decision"] = "HOLD"
                     analysis["confidence"] = max(confidence - 20, 40)
@@ -1917,26 +1706,18 @@ IMPORTANT:
         price_data = data.get("price") or {}
         crypto_factors = data.get("crypto_factors") or {}
         
-        # 1. 技术指标评分 (-100 to +100)
         technical_score = self._calculate_technical_score(indicators, price_data)
         
-        # 2. 基本面评分 (-100 to +100)
         fundamental_score = self._calculate_fundamental_score(fundamental, data.get("market", ""))
         crypto_factor_objective = self._calculate_crypto_factor_score(crypto_factors, price_data)
         crypto_factor_score = float(crypto_factor_objective.get("score", 0.0) or 0.0)
         if str(data.get("market") or "").strip() == "Crypto" and crypto_factors:
             fundamental_score = crypto_factor_score
         
-        # 3. 新闻情绪评分 (-100 to +100)
         sentiment_score = self._calculate_sentiment_score(news)
         
-        # 4. 宏观环境评分 (-100 to +100)
         macro_score = self._calculate_macro_score(macro, data.get("market", ""))
         
-        # 5. 综合评分（加权平均）
-        # 优化权重：默认技术35%，基本面20%，情绪25%（包含地缘政治），宏观20%（提高宏观权重）
-        # 但要做“可用信息重加权”：当某些模块缺失（如新闻/宏观没取到），不要用0分去稀释整体强度，
-        # 而是重新归一化权重，让技术信号在缺失时仍可发挥主导作用。
         market_type = str(data.get("market") or "")
 
         def _fundamental_meaningful(fund: Dict[str, Any]) -> bool:
@@ -1971,7 +1752,6 @@ IMPORTANT:
             fundamental_present = True
         sentiment_present = bool(news)
         macro_present = bool(macro)
-        # indicators 一旦成功计算通常就存在，但这里也做一次保护
         technical_present = bool(indicators)
 
         weights = {
@@ -2084,7 +1864,6 @@ IMPORTANT:
         weight_sum = 0.0
         risk = self._technical_risk_context(indicators, price_data)
         
-        # RSI 评分 (-50 to +50)
         rsi_data = indicators.get("rsi", {})
         rsi_value = rsi_data.get("value", 50)
         if rsi_value > 0:
@@ -2108,7 +1887,6 @@ IMPORTANT:
             score += rsi_score * 0.30
             weight_sum += 0.30
         
-        # MACD 评分 (-40 to +40)
         macd_data = indicators.get("macd", {})
         macd_signal = macd_data.get("signal", "neutral")
         if macd_signal == "bullish":
@@ -2120,7 +1898,6 @@ IMPORTANT:
         score += macd_score * 0.25
         weight_sum += 0.25
         
-        # 均线趋势评分 (-40 to +40)
         ma_data = indicators.get("moving_averages", {})
         ma_trend = ma_data.get("trend", "sideways")
         if "strong_uptrend" in ma_trend.lower():
@@ -2136,7 +1913,6 @@ IMPORTANT:
         score += ma_score * 0.25
         weight_sum += 0.25
         
-        # 24小时涨跌幅评分 (-20 to +20)
         change_24h = price_data.get("changePercent", 0)
         if change_24h > 10:
             change_score = -20  # 过度上涨，利空
@@ -2155,21 +1931,14 @@ IMPORTANT:
         score += change_score * 0.20
         weight_sum += 0.20
 
-        # ========== 额外技术特征（轻量增强，不改变主体结构） ==========
-        # 这些特征来自 MarketDataCollector._calculate_indicators 的输出：
-        # - price_position: 过去20根K线区间位置 0~100
-        # - volume_ratio: 最新成交量 / 20期均量
         # - bollinger: BB_upper/BB_lower/BB_width
         # - volatility: atr, pct
         extra_score = 0.0
         extra_weight = 0.0
 
-        # 1) 区间位置：接近区间顶部更偏利空，接近区间底部更偏利多
         try:
             pp = float(indicators.get("price_position", 50.0))
-            # 0~100 -> -15~+15 (线性映射，中心50为0)
             pp_score = (50.0 - pp) * 0.3
-            # 在极端区域增强信号
             if pp >= 85:
                 pp_score -= 5
             elif pp <= 15:
@@ -2183,7 +1952,6 @@ IMPORTANT:
         except Exception:
             pass
 
-        # 2) 布林带触及：突破上轨偏利空，跌破下轨偏利多
         try:
             cur_px = float(indicators.get("current_price") or price_data.get("price") or 0.0)
             bb = indicators.get("bollinger") or {}
@@ -2204,7 +1972,6 @@ IMPORTANT:
         except Exception:
             pass
 
-        # 3) 成交量放大：在趋势方向上加分，逆趋势减分（弱信号）
         try:
             vr = float(indicators.get("volume_ratio") or 1.0)
             trend = str(indicators.get("trend") or indicators.get("moving_averages", {}).get("trend") or "").lower()
@@ -2216,22 +1983,18 @@ IMPORTANT:
                     extra_score += (-16 if risk.get("change_24h", 0.0) < 0 else -8)
                     extra_weight += 0.15
                 else:
-                    # 放量但无趋势：更偏不确定，略微降低（当作偏利空风险）
                     extra_score += -3
                     extra_weight += 0.10
             elif vr <= 0.6:
-                # 缩量：趋势信号可信度下降（轻微回归到0）
                 extra_score += 0
                 extra_weight += 0.05
         except Exception:
             pass
 
-        # 4) 高波动：减少强方向自信（用“缩放”形式实现，避免硬反转）
         try:
             vol = indicators.get("volatility") or {}
             vol_pct = float(vol.get("pct") or 0.0)
             if vol_pct >= 6.0:
-                # 极高波动：把额外分数打折，并轻微把总体拉回0
                 extra_score *= 0.6
                 score *= 0.92
             elif vol_pct >= 3.5:
@@ -2247,7 +2010,6 @@ IMPORTANT:
             score += extra_norm * 0.15
             weight_sum += 0.15
         
-        # 归一化到-100到+100
         if weight_sum > 0:
             score = score / max(1.0, weight_sum)
         if risk.get("panic_breakdown"):
@@ -2265,7 +2027,6 @@ IMPORTANT:
         score = 0.0
         factors = 0
         
-        # PE Ratio 评分
         pe_ratio = fundamental.get("pe_ratio")
         if pe_ratio and pe_ratio > 0:
             if pe_ratio < 15:
@@ -2281,7 +2042,6 @@ IMPORTANT:
             score += pe_score
             factors += 1
         
-        # ROE 评分
         roe = fundamental.get("roe")
         if roe:
             if roe > 20:
@@ -2297,7 +2057,6 @@ IMPORTANT:
             score += roe_score
             factors += 1
         
-        # 营收增长评分
         revenue_growth = fundamental.get("revenue_growth")
         if revenue_growth:
             if revenue_growth > 20:
@@ -2313,7 +2072,6 @@ IMPORTANT:
             score += growth_score
             factors += 1
         
-        # 利润率评分
         profit_margin = fundamental.get("profit_margin")
         if profit_margin:
             if profit_margin > 20:
@@ -2329,7 +2087,6 @@ IMPORTANT:
             score += margin_score
             factors += 1
         
-        # 债务权益比评分
         debt_to_equity = fundamental.get("debt_to_equity")
         if debt_to_equity:
             if debt_to_equity < 0.5:
@@ -2341,7 +2098,6 @@ IMPORTANT:
             score += debt_score
             factors += 1
         
-        # 归一化（如果有多个因素）
         if factors > 0:
             score = score / factors * 100 / 4  # 最大可能分数是4个因素各20分=80，归一化到100
         else:
@@ -2458,12 +2214,12 @@ IMPORTANT:
             sentiment = item.get("sentiment", "neutral")
             is_global_event = item.get("is_global_event", False)
 
-            level, tag = _geopolitical_match_level(text)
+            level, tag = geopolitical_match_level(text)
             if is_global_event and level == "none":
                 level, tag = "moderate", "is_global_event"
 
             if level != "none":
-                delta = _geopolitical_sentiment_penalty_delta(level)
+                delta = geopolitical_sentiment_penalty_delta(level)
                 new_total = geopolitical_penalty + delta
                 if new_total < max_geo_total:
                     delta = max_geo_total - geopolitical_penalty
@@ -2511,7 +2267,6 @@ IMPORTANT:
         score = 0.0
         factors = 0
         
-        # VIX 评分（恐慌指数）- 权重提高
         vix = macro.get("VIX", {})
         vix_value = vix.get("price", 0)
         if vix_value > 0:
@@ -2532,12 +2287,10 @@ IMPORTANT:
             score += vix_score
             factors += 1
         
-        # DXY 评分（美元指数）- 权重提高
         dxy = macro.get("DXY", {})
         dxy_value = dxy.get("price", 0)
         dxy_change = dxy.get("changePercent", 0)
         if dxy_value > 0:
-            # 对于加密货币和商品，强美元通常是利空
             if market in ["Crypto", "Forex", "Futures"]:
                 if dxy_change > 2:
                     dxy_score = -30  # 美元大幅走强，严重利空
@@ -2550,7 +2303,6 @@ IMPORTANT:
                 else:
                     dxy_score = 0
             else:
-                # 对股票也有影响，但较小
                 if dxy_change > 2:
                     dxy_score = -10
                 elif dxy_change < -2:
@@ -2560,12 +2312,10 @@ IMPORTANT:
             score += dxy_score
             factors += 1
         
-        # 利率评分（TNX）- 权重提高
         tnx = macro.get("TNX", {})
         tnx_change = tnx.get("changePercent", 0)
         tnx_value = tnx.get("price", 0)
         if tnx_change != 0 or tnx_value > 0:
-            # 利率上升对成长股和加密货币通常是利空
             if market in ["Crypto", "USStock"]:
                 if tnx_change > 3:
                     tnx_score = -30  # 利率大幅上升，严重利空
@@ -2582,7 +2332,6 @@ IMPORTANT:
             score += tnx_score
             factors += 1
 
-        # 恐惧贪婪指数（更适合 Crypto）：极端贪婪偏利空，极端恐惧偏利多（弱信号）
         try:
             fg = macro.get("FEAR_GREED", {}) or {}
             fg_value = float(fg.get("price") or 0.0)
@@ -2602,11 +2351,7 @@ IMPORTANT:
         except Exception:
             pass
         
-        # 归一化（考虑权重）
         if factors > 0:
-            # 最大可能分数：VIX(-50~+20), DXY(-30~+30), TNX(-30~+30) = 约-110到+80
-            # 归一化到-100到+100
-            # 加上 Fear&Greed 的幅度（约 15），给点 buffer
             max_possible = 125  # 最大绝对值
             score = score / max_possible * 100
         
@@ -2653,14 +2398,11 @@ IMPORTANT:
     
     def _calculate_overall_score(self, analysis: Dict) -> int:
         """Calculate weighted overall score (legacy method, now uses objective score if available)."""
-        # 优先使用客观评分
         if "objective_score" in analysis:
             objective = analysis["objective_score"]
             overall = objective.get("overall_score", 50)
-            # 转换为0-100格式（原系统使用）
             return max(0, min(100, int(50 + overall * 0.5)))
         
-        # 降级到LLM评分
         tech = analysis.get("technical_score", 50)
         fund = analysis.get("fundamental_score", 50)
         sent = analysis.get("sentiment_score", 50)

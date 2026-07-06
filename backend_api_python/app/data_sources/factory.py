@@ -2,15 +2,31 @@
 数据源工厂
 根据市场类型返回对应的数据源
 """
+import os
+import threading
+import time
 from typing import Dict, List, Any, Optional
 
 from app.data_sources.base import BaseDataSource
 from app.data_sources.errors import UnsupportedMarketError
 from app.utils.logger import get_logger
+from app.utils.resource_guard import (
+    ResourceExhaustedError,
+    assert_fd_available,
+    is_fd_exhaustion,
+    mark_fd_exhausted,
+)
 
 logger = get_logger(__name__)
 
-# 小写 / 别名 -> 与 _create_source 一致的 PascalCase key
+
+def _env_positive_int(key: str, default: int) -> int:
+    try:
+        value = int(os.getenv(key, str(default)))
+        return value if value > 0 else default
+    except Exception:
+        return default
+
 _MARKET_ALIASES: Dict[str, str] = {
     "crypto": "Crypto",
     "cryptocurrency": "Crypto",
@@ -27,7 +43,22 @@ _MARKET_ALIASES: Dict[str, str] = {
     "alpaca": "USStock",
     "ibkr": "USStock",
     "cnstock": "CNStock",
+    "cn_stock": "CNStock",
+    "ashare": "CNStock",
+    "a_share": "CNStock",
+    "astock": "CNStock",
+    "a_stock": "CNStock",
+    "cn": "CNStock",
+    "china": "CNStock",
+    "chinastock": "CNStock",
     "hkstock": "HKStock",
+    "hk_stock": "HKStock",
+    "hshare": "HKStock",
+    "h_share": "HKStock",
+    "hkshare": "HKStock",
+    "hk_share": "HKStock",
+    "hk": "HKStock",
+    "hongkong": "HKStock",
     "futures": "Futures",
     "moex": "MOEX",
     "rustock": "MOEX",
@@ -44,9 +75,28 @@ class DataSourceFactory:
     """
     
     _sources: Dict[str, BaseDataSource] = {}
+    _noise_lock = threading.Lock()
+    _noise_seen: Dict[str, tuple[float, int]] = {}
+    _noise_interval_sec = _env_positive_int("LOG_DEDUPE_INTERVAL_SEC", 60)
     
     # Markets that pass through normalize_market unchanged.
     _CANONICAL_MARKETS = ("Crypto", "Forex", "Futures", "USStock", "CNStock", "HKStock", "MOEX")
+
+    @classmethod
+    def _log_limited(cls, level: str, key: str, message: str, *args: Any) -> None:
+        """Log noisy market-data failures at most once per key per interval."""
+        now = time.monotonic()
+        with cls._noise_lock:
+            last, suppressed = cls._noise_seen.get(key, (0.0, 0))
+            if last > 0 and now - last < cls._noise_interval_sec:
+                cls._noise_seen[key] = (last, suppressed + 1)
+                return
+            cls._noise_seen[key] = (now, 0)
+
+        if suppressed:
+            message = f"{message} (suppressed {suppressed} duplicate log(s))"
+        log_fn = getattr(logger, level, logger.warning)
+        log_fn(message, *args)
 
     @classmethod
     def normalize_market(cls, market: str) -> str:
@@ -74,6 +124,14 @@ class DataSourceFactory:
         key = raw.lower().replace(" ", "").replace("-", "_")
         if key in _MARKET_ALIASES:
             return _MARKET_ALIASES[key]
+        cls._log_limited(
+            "warning",
+            f"unknown-market:{raw}",
+            "DataSourceFactory.normalize_market(): unknown market %r; "
+            "passing through as-is; downstream get_source() will likely fail.",
+            raw,
+        )
+        return raw
         logger.warning(
             "DataSourceFactory.normalize_market(): unknown market %r — "
             "passing through as-is; downstream get_source() will likely fail.",
@@ -110,7 +168,7 @@ class DataSourceFactory:
             return cls.get_source("Crypto")
         if key in ("futures",):
             return cls.get_source("Futures")
-        if key in ("forex", "fx", "mt5"):
+        if key in ("forex", "fx"):
             return cls.get_source("Forex")
         if key in ("usstock", "us_stocks", "stock", "stocks", "ibkr", "alpaca"):
             return cls.get_source("USStock")
@@ -179,17 +237,37 @@ class DataSourceFactory:
         Returns:
             K线数据列表
         """
+        m = cls.normalize_market(market or "")
         try:
-            m = cls.normalize_market(market or "")
+            assert_fd_available(f"market-data kline {m}:{symbol}")
             source = cls._resolve_source(m, exchange_id=exchange_id, market_type=market_type)
             klines = source.get_kline(symbol, timeframe, limit, before_time, after_time)
             
-            # 确保数据按时间排序
             klines.sort(key=lambda x: x['time'])
             
             return klines
+        except ResourceExhaustedError as e:
+            cls._log_limited(
+                "error",
+                f"fd-cooldown:kline:{m}:{symbol}",
+                "Skipped K-lines %s:%s because resource guard is active: %s",
+                market,
+                symbol,
+                str(e),
+            )
+            return []
         except Exception as e:
-            logger.error(f"Failed to fetch K-lines {market}:{symbol} (normalized={cls.normalize_market(market or '')}) - {str(e)}")
+            if is_fd_exhaustion(e):
+                mark_fd_exhausted(e)
+            cls._log_limited(
+                "error",
+                f"kline:{m}:{symbol}:{type(e).__name__}:{str(e)[:160]}",
+                "Failed to fetch K-lines %s:%s (normalized=%s) - %s",
+                market,
+                symbol,
+                m,
+                str(e),
+            )
             return []
     
     @classmethod
@@ -201,13 +279,14 @@ class DataSourceFactory:
         market_type: Optional[str] = None,
     ) -> BaseDataSource:
         """Pick data source; crypto live strategies may scope to execution exchange."""
-        if market == "Crypto" and (exchange_id or "").strip():
+        ex = (exchange_id or "").strip().lower()
+        mt = (market_type or "").strip().lower()
+        if mt in ("futures", "future", "perp", "perpetual"):
+            mt = "swap"
+        if market == "Crypto" and (ex or mt == "swap"):
             from app.data_sources.crypto import CryptoDataSource
 
-            mt = (market_type or "swap").strip().lower()
-            if mt in ("futures", "future", "perp", "perpetual"):
-                mt = "swap"
-            return CryptoDataSource.for_exchange(str(exchange_id).strip().lower(), mt)
+            return CryptoDataSource.for_exchange(ex, mt or "swap")
         return cls.get_source(market)
 
     @classmethod
@@ -229,14 +308,39 @@ class DataSourceFactory:
                 ...
             }
         """
+        m = cls.normalize_market(market or "")
         try:
-            m = cls.normalize_market(market or "")
+            assert_fd_available(f"market-data ticker {m}:{symbol}")
             source = cls._resolve_source(m, exchange_id=exchange_id, market_type=market_type)
             return source.get_ticker(symbol)
+        except ResourceExhaustedError as e:
+            cls._log_limited(
+                "error",
+                f"fd-cooldown:ticker:{m}:{symbol}",
+                "Skipped ticker %s:%s because resource guard is active: %s",
+                market,
+                symbol,
+                str(e),
+            )
+            return {'last': 0, 'symbol': symbol}
         except NotImplementedError:
-            logger.warning(f"get_ticker not implemented for market: {market}")
+            cls._log_limited(
+                "warning",
+                f"ticker-not-implemented:{m}",
+                "get_ticker not implemented for market: %s",
+                market,
+            )
             return {'last': 0, 'symbol': symbol}
         except Exception as e:
-            logger.error(f"Failed to fetch ticker {market}:{symbol} - {str(e)}")
+            if is_fd_exhaustion(e):
+                mark_fd_exhausted(e)
+            cls._log_limited(
+                "error",
+                f"ticker:{m}:{symbol}:{type(e).__name__}:{str(e)[:160]}",
+                "Failed to fetch ticker %s:%s - %s",
+                market,
+                symbol,
+                str(e),
+            )
             return {'last': 0, 'symbol': symbol}
 
