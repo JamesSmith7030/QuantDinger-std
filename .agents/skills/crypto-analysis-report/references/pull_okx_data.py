@@ -113,6 +113,13 @@ def build_sections(symbol: str, mode: str = "short") -> list[Section]:
         ["okx", "market", "indicator", "atr", spot, "--bar", "1Dutc", "--params", "14"],
         [r"^\s*14\s+[\d.]+"],
     ))
+    if mode == "swing":
+        # 波段用周线 ATR 定止损（波动尺度更贴数天-数周持仓）；短线不取
+        sections.append(Section(
+            "ATR14W",
+            ["okx", "market", "indicator", "atr", spot, "--bar", "1Wutc", "--params", "14"],
+            [r"^\s*14\s+[\d.]+"],
+        ))
     for period in ("5", "10", "20"):
         sections.append(Section(
             f"MA{period}",

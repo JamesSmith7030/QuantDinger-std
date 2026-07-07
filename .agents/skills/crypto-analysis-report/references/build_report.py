@@ -35,6 +35,10 @@ MACD_KEYS = {
 LABELS = {"short": ["15m", "1H", "4H", "1D"], "swing": ["1H", "4H", "1D", "1W"]}
 MODE_CN = {"short": "短线", "swing": "波段"}
 HOLD_CN = {"short": "短线（1-3天）", "swing": "波段（数天-数周）"}
+# 三支柱权重（宏观, 量价, 衍生）：波段更看估值，宏观加权
+WEIGHTS = {"short": (0.30, 0.40, 0.30), "swing": (0.40, 0.35, 0.25)}
+# decide 里判趋势动能共振用的两个周期：波段看更高周期
+TREND_TFS = {"short": ("4H", "1D"), "swing": ("1D", "1W")}
 
 
 def parse_sections(txt):
@@ -87,7 +91,9 @@ def parse(in_dir, coin, mode):
     d['kdj'] = (num(kd, r'k\s+([\d.]+)'), num(kd, r'd\s+([\d.]+)'), num(kd, r'j\s+([\d.]+)'))
     d['ema50'] = num(s['EMA50'], r'^\s*50\s+([\d.]+)')
     d['ema200'] = num(s['EMA200'], r'^\s*200\s+([\d.]+)')
-    d['atr'] = num(s['ATR14'], r'^\s*14\s+([\d.]+)')
+    d['atr'] = num(s['ATR14'], r'^\s*14\s+([\d.]+)')  # 日线 ATR（§五展示 + 波动性）
+    if mode == "swing":
+        d['atr_w'] = num(s['ATR14W'], r'^\s*14\s+([\d.]+)')  # 周线 ATR（波段止损定尺）
     d['ma'] = (num(s['MA5'], r'^\s*5\s+([\d.]+)'), num(s['MA10'], r'^\s*10\s+([\d.]+)'), num(s['MA20'], r'^\s*20\s+([\d.]+)'))
     tl = s['TLS']
     d['tls'] = (num(tl, r'longRatio\s+([\d.]+)'), num(tl, r'shortRatio\s+([\d.]+)'), num(tl, r'longShortRatio\s+([\d.]+)'))
@@ -129,7 +135,8 @@ def score(d):
     fund_s = 50 - min(max(d['funding'] / 0.01 * 3, -15), 15)
     tls_s = 50 + (d['tls'][2] - 1.0) * 50
     deriv = (fund_s + tls_s) / 2
-    comp = macro * 0.3 + vp * 0.4 + deriv * 0.3
+    wm, wv, wd = WEIGHTS[d['mode']]
+    comp = macro * wm + vp * wv + deriv * wd
     return round(macro, 1), round(vp, 1), round(deriv, 1), round(comp, 1)
 
 
@@ -143,15 +150,18 @@ def derive(d):
     U, M, Lo = d['bb1d']
     support = (S1 + d['sw_lo'] + Lo) / 3
     resistance = (R1 + d['sw_hi'] + U) / 3
-    price, atr = d['price'], d['atr']
-    sl = max(price - 2 * atr, support * 0.99)
-    tp = min(price + 3 * atr, resistance * 1.01)
+    price = d['price']
+    atr_stop = d.get('atr_w', d['atr'])  # 波段用周线 ATR 定止损，短线用日线 ATR
+    atr_tf = '1W' if 'atr_w' in d else '1D'
+    sl = max(price - 2 * atr_stop, support * 0.99)
+    tp = min(price + 3 * atr_stop, resistance * 1.01)
     rr = (tp - price) / (price - sl) if price > sl else float('nan')
     rp = (price - d['sw_lo']) / (d['sw_hi'] - d['sw_lo']) * 100
     bw = (U - Lo) / M * 100
-    volp = atr / price * 100
+    volp = d['atr'] / price * 100  # 波动性用日线 ATR（展示口径不变）
     return dict(P=P, R1=R1, S1=S1, R2=R2, S2=S2, support=support, resistance=resistance,
-                sl=sl, tp=tp, rr=rr, rangepos=rp, bw=bw, volp=volp)
+                sl=sl, tp=tp, rr=rr, rangepos=rp, bw=bw, volp=volp,
+                atr_stop=atr_stop, atr_tf=atr_tf)
 
 
 def fmt(x, dp=2):
@@ -166,11 +176,11 @@ def decide(d, k, sc):
     i4, i1 = i_of(d, '4H'), i_of(d, '1D')
     rsi_4h = d['rsi'][i4]
     j = d['kdj'][2]
-    hist_4h, hist_1d = d['hist'][i4], d['hist'][i1]
     lsr = d['tls'][2]
     rr = k['rr']
     above_ma = price > ma5 and price > ma10
-    st_up = hist_4h > 0 and hist_1d > 0
+    ta, tb = TREND_TFS[d['mode']]  # 短线 4H+1D、波段 1D+1W
+    st_up = d['hist'][i_of(d, ta)] > 0 and d['hist'][i_of(d, tb)] > 0
     overbought = rsi_4h >= 70 or j >= 100
     overheated = comp >= 60
     below200 = price < d['ema200']
@@ -277,6 +287,10 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
     nma = sum(1 for m in d['ma'] if d['price'] > m)
     volcat = "高" if k['volp'] > 5 else "中" if k['volp'] > 2 else "低"
     lbl = "/".join(labels)
+    wm, wv, wd = WEIGHTS[mode]
+    wpct = f"宏观{wm * 100:.0f}% + 量价{wv * 100:.0f}% + 衍生品{wd * 100:.0f}%"
+    comp_formula = f"{macro}×{wm:.2f} + {vp}×{wv:.2f} + {deriv}×{wd:.2f} = {comp}"
+    ta, tb = TREND_TFS[mode]  # 趋势确认周期（提示语用）
     rsi_line = "、".join(f"{labels[i]} {rsirow(d['rsi'][i])}" for i in range(4))
     macd_line = "、".join(f"{labels[i]} {d['hist'][i]:+}" for i in range(4))
     rsi_detail = " / ".join(f"{labels[i]} {d['rsi'][i]}" for i in range(4))
@@ -288,10 +302,11 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
                  f"| **交易方向** | **{dec['dir']}** | 偏多确认（站上短均线+多周期 MACD 转正） |\n"
                  f"| 当前价格 | ${fmt(d['price'])} | 24h {d['chg']:+.2f}% |\n"
                  f"| 建议入场 | {dec['entry']} | 回踩确认不破关键位 |\n"
-                 f"| 止损价 | ${fmt(k['sl'])} | max(现价−2×ATR, 支撑×0.99) |\n"
-                 f"| 止盈目标 | ${fmt(k['tp'])} | min(现价+3×ATR, 阻力×1.01) |\n"
+                 f"| 止损价 | ${fmt(k['sl'])} | max(现价−2×{k['atr_tf']}ATR, 支撑×0.99) |\n"
+                 f"| 止盈目标 | ${fmt(k['tp'])} | min(现价+3×{k['atr_tf']}ATR, 阻力×1.01) |\n"
                  f"| 风险回报比 | 1 : {k['rr']:.2f} | 多单参考 |\n\n"
-                 f"> ⚠️ {dec['note']}。支撑/阻力为三方法平均（枢轴+20日摆动+布林）。非投资建议。")
+                 f"> ⚠️ {dec['note']}。止损止盈基于 **{k['atr_tf']} ATR(14)=${fmt(k['atr_stop'])}**；"
+                 f"支撑/阻力为三方法平均（枢轴+20日摆动+布林）。非投资建议。")
     else:
         guide = (f"**形态 B — HOLD（{dec['note']}）：只显示当前价格：**\n"
                  "| 项目 | 价位 | 说明 |\n|------|------|------|\n"
@@ -317,7 +332,7 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 
     md = f"""# {coin}/USDT 深度{mode_cn}分析报告
 
-> 生成时间：{tsh} (UTC+8) ｜ 数据源：OKX 实时行情（基础档） ｜ 模式：**{mode_cn}**（周期 {lbl}） ｜ 分析框架：三支柱评分（宏观30% + 量价40% + 衍生品30%）
+> 生成时间：{tsh} (UTC+8) ｜ 数据源：OKX 实时行情（基础档） ｜ 模式：**{mode_cn}**（周期 {lbl}） ｜ 分析框架：三支柱评分（{wpct}）
 > ⚠️ 本报告仅为客观技术分析与数据整理，**不构成投资建议**。加密资产波动剧烈，请自行研究（DYOR）并自担风险。
 
 ---
@@ -383,17 +398,17 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 
 > 因子偏向：衍生品 {deriv}（{'中性偏空' if lsr < 1 else '中性偏多'}）；挤仓风险：低。
 
-## 四、三支柱评分拆解
-### 支柱一 · 宏观周期（30%）— 评分 ≈ {macro}
+## 四、三支柱评分拆解（权重 {wpct}）
+### 支柱一 · 宏观周期（{wm * 100:.0f}%）— 评分 ≈ {macro}
 {macro_txt}（分数越低=越低估=越利多）
-### 支柱二 · 量价因子（40%）— 评分 ≈ {vp}
+### 支柱二 · 量价因子（{wv * 100:.0f}%）— 评分 ≈ {vp}
 多周期 RSI：{rsi_line}。
 多周期 MACD 柱：{macd_line}（{npos}/4 为正）。
 均线：价 vs MA5 ${fmt(ma5, 1)} / MA10 ${fmt(ma10, 1)} / MA20 ${fmt(ma20, 1)}（{nma}/3 站上）；KDJ K{d['kdj'][0]}/D{d['kdj'][1]}/J{d['kdj'][2]}。
-### 支柱三 · 衍生品（30%）— 评分 ≈ {deriv}
+### 支柱三 · 衍生品（{wd * 100:.0f}%）— 评分 ≈ {deriv}
 资金费率 {d['funding']:+.4f}%、OI {fmt(d['oi'])} {d['unit']}、顶级多空比 {lsr}。
 ### 综合评分
-`{macro}×0.30 + {vp}×0.40 + {deriv}×0.30 = {comp}` → {zone}
+`{comp_formula}` → {zone}
 
 ## 五、技术指标 PRO
 | 指标 | 值 | 状态 |
