@@ -34,6 +34,15 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL", "BNB"]
 
+# 多周期 RSI/MACD 的周期集（其余日线锚定指标两模式相同）：
+#   short（默认·短线 1-3天）: 15m/1H/4H/1D —— 15m 做入场择时
+#   swing（波段 数天-数周）  : 1H/4H/1D/1W —— 删 15m 噪声、加周线 1Wutc 定趋势
+# 注意 OKX 指标周线写 1Wutc（1W 会 HTTP 400）。build_report.py 按此顺序解析。
+RSI_MACD_BARS = {
+    "short": ("15m", "1H", "4H", "1Dutc"),
+    "swing": ("1H", "4H", "1Dutc", "1Wutc"),
+}
+
 # Windows 上 okx 是 npm 装的 .cmd 包装脚本，subprocess 在 shell=False 时
 # 无法直接启动 .cmd（非 PE 可执行文件），必须走 shell=True 才能被 cmd.exe 解析执行。
 USE_SHELL = os.name == "nt"
@@ -55,9 +64,10 @@ class FetchResult:
     attempts: int = 0
 
 
-def build_sections(symbol: str) -> list[Section]:
+def build_sections(symbol: str, mode: str = "short") -> list[Section]:
     spot = f"{symbol}-USDT"
     swap = f"{symbol}-USDT-SWAP"
+    bars = RSI_MACD_BARS[mode]
     sections = [
         Section(
             "TICKER",
@@ -66,13 +76,13 @@ def build_sections(symbol: str) -> list[Section]:
              r"^24h vol\s+[\d.]+", r"^24h change %\s+-?[\d.]+%"],
         ),
     ]
-    for bar in ("15m", "1H", "4H", "1Dutc"):
+    for bar in bars:
         sections.append(Section(
             f"RSI {bar}",
             ["okx", "market", "indicator", "rsi", spot, "--bar", bar],
             [r"^\s*14\s+[\d.]+", r"^ts\s+\S"],
         ))
-    for bar in ("15m", "1H", "4H", "1Dutc"):
+    for bar in bars:
         sections.append(Section(
             f"MACD {bar}",
             ["okx", "market", "indicator", "macd", spot, "--bar", bar],
@@ -181,9 +191,10 @@ def run_with_retry(cmd: list[str], patterns: list[str], retries: int, min_delay:
 
 
 def fetch_symbol(symbol: str, out_dir: Path, retries: int, min_delay: float, max_delay: float,
-                  timeout: float, candle_limit: int) -> tuple[str, list[str]]:
-    sections = build_sections(symbol)
-    lines: list[str] = []
+                  timeout: float, candle_limit: int, mode: str = "short") -> tuple[str, list[str]]:
+    sections = build_sections(symbol, mode)
+    # 首段写模式标记，供 build_report.py 自动识别 short/swing
+    lines: list[str] = [f"=== MODE ===", mode]
     failures: list[str] = []
     for sec in sections:
         result = run_with_retry(sec.cmd, sec.patterns, retries, min_delay, max_delay, timeout)
@@ -225,6 +236,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=20.0, help="单条 okx 命令超时秒数（默认 20）")
     parser.add_argument("--candle-limit", type=int, default=25,
                          help="K 线拉取根数，需 >=22 才够 20 日摆动高低计算（默认 25）")
+    parser.add_argument("--mode", default="short", choices=["short", "swing"],
+                         help="short=短线 15m/1H/4H/1D（默认）；swing=波段 1H/4H/1D/1W")
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
@@ -235,14 +248,15 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=max(1, len(symbols))) as pool:
         futures = [
             pool.submit(fetch_symbol, sym, out_dir, args.retries, args.min_delay,
-                        args.max_delay, args.timeout, args.candle_limit)
+                        args.max_delay, args.timeout, args.candle_limit, args.mode)
             for sym in symbols
         ]
         for fut in futures:
             symbol, failures = fut.result()
             all_failures[symbol] = failures
 
-    print(f"拉取完成：{', '.join(symbols)} → {out_dir}")
+    print(f"拉取完成（模式={args.mode}，周期 {'/'.join(RSI_MACD_BARS[args.mode])}）："
+          f"{', '.join(symbols)} → {out_dir}")
     has_failure = False
     for symbol in symbols:
         failures = all_failures[symbol]

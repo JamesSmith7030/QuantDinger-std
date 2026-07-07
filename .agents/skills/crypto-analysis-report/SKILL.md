@@ -1,18 +1,21 @@
 ---
 name: crypto-analysis-report
-version: 1.2.4
+version: 1.3.0
 date: 2026-06-13
-updated: 2026-07-04
+updated: 2026-07-06
 description: >-
   加密货币与股票/股票代币深度分析与专业报告生成技能。获取实时行情、计算多周期
   技术指标、按三支柱框架评分（加密：宏观30%+量价40%+衍生品30%；股票：估值30%+
   量价40%+市场30%），生成结构化 Markdown 专业分析报告。支持单标的与多标的；
-  多标的时各自独立成报告。当用户说"分析 BTC/ETH/SOL"、"分析 TSLA/NVDA/AAPL 股票"、
-  "分析特斯拉股票代币"、"生成行情报告"、"深度分析某币/某股"、"出一份专业报告"
-  时使用。报告落盘到 analysis_reports/<symbol>_report_<时间戳>.md。
+  多标的时各自独立成报告。支持短线/波段双模式（提示词含"波段"→波段周期
+  1H/4H/1D/1W，否则默认短线 15m/1H/4H/1D）。当用户说"分析 BTC/ETH/SOL"、
+  "生成一份最新的深度分析报告"、"…深度短线分析报告"、"…深度波段分析报告"、
+  "分析 TSLA/NVDA 股票"、"分析特斯拉股票代币"、"深度分析某币/某股"、"出一份专业报告"
+  时使用。报告落盘到 analysis_reports/<symbol>_report_<时间戳>.md（波段带 swing_ 前缀）。
 ---
 
 <!-- 变更日志（维护用）：
+  v1.3.0 (2026-07-06) — 新增「短线/波段」双分析模式（第 0.5 步）+ 固化报告渲染器 `references/build_report.py`。短线（默认）多周期 RSI/MACD=15m/1H/4H/1D；波段（提示词含"波段"触发）=1H/4H/1D/1W（删 15m、加周线 1Wutc）。pull_okx_data.py 加 `--mode short|swing` 并写 `=== MODE ===` 标记；build_report.py `--mode auto` 自动识别、按周期标签索引确保 4H/1D 引用不错位、波段报告文件名带 swing_ 前缀。日线锚定指标/评分/ATR/枢轴两模式一致（先最小改动）。
   v1.2.4 (2026-07-04) — 第 1A 步新增可复用拉取脚本 `references/pull_okx_data.py`：单条 okx 命令校验下游 parse 实际用到的字段（如 dif/dea/ts/14/50/200），空/半截输出自动退避 1-2 秒重试（默认 2 次），仍失败则在文件里写 `[FETCH_FAILED: 原因]` 并汇总报错退出，替代内联手写 bash + 事后人工补拉。
   v1.2.3 (2026-07-03) — 第 1A 步 MACD 组补 15m 周期（`--bar 15m`），与既有 15m RSI 交叉印证，消除 15m 孤儿信号；服务短线（1-3天/日频）入场择时。周期矩阵仍为 15m/1H/4H/1Dutc，未加 1W（短线持仓 1D 背景已足）。
   v1.2.2 (2026-06-19) — 开仓指南强化双向：方向由数据决定（偏多确认→做多 / 偏空确认→做空镜像 / 多空交织→HOLD 只显当前价），明令禁止默认做多；中性偏多/偏空仅为倾向标注、非成交方向。
@@ -112,6 +115,29 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 - 永续（资金费率/持仓量）：`BTC-USDT-SWAP`
 - 多标的：逐个循环，**每个标的走完取数→评分→落盘并各自独立成报告**；加密与股票可混合请求，各按自己的分支处理。
 
+### 第 0.5 步 · 判定分析模式（短线 / 波段）
+
+同一套三支柱框架下支持两种 K 线周期集，**由用户提示词决定**，其余评分/ATR/枢轴口径完全一致：
+
+| 模式 | 触发提示词 | 多周期 RSI/MACD | 定位 |
+|------|-----------|-----------------|------|
+| **短线**（默认） | "生成一份最新的深度分析报告"、"…深度**短线**分析报告"（不含"波段"即短线） | `15m/1H/4H/1D` | 1-3 天持仓、日频进出，15m 做入场择时 |
+| **波段** | "…生成一份最新的深度**波段**分析报告"（提示词含"**波段**"） | `1H/4H/1D/1W` | 数天-数周持仓，删 15m 噪声、加周线 1Wutc 定趋势 |
+
+判定规则：**提示词出现"波段"→ swing 模式；否则默认 short（短线）**。波段模式报告标题为「深度**波段**分析报告」、文件名带 `swing_` 前缀（`<sym>_swing_report_<ts>.md`），短线沿用 `<sym>_report_<ts>.md`。
+
+**端到端两步跑（推荐，替代逐条手敲）**：
+
+```bash
+SKILL=.agents/skills/crypto-analysis-report/references
+# ① 拉数据（--mode short|swing；写入 <SYM>.txt 含 MODE 标记 + <SYM>_c20.txt）
+python $SKILL/pull_okx_data.py --symbols BTC,ETH,SOL,BNB --out-dir <拉取目录> --mode short   # 或 --mode swing
+# ② 渲染报告（--mode auto 自动读数据里的 MODE 标记；落盘 analysis_reports/）
+python $SKILL/build_report.py  --symbols BTC,ETH,SOL,BNB --in-dir <拉取目录> --out-dir analysis_reports
+```
+
+下面第 1A 步的命令清单是 `pull_okx_data.py`（短线口径）内置取数的对照参考；波段模式把 RSI/MACD 的 `15m` 换成 `1Wutc`（写周线用 `1Wutc`，`1W` 会 HTTP 400），其余日线指标不变。
+
 ### 第 1A 步 · 拉实时数据与指标（加密分支，每个币）
 
 > 🔁 **推荐用可复用脚本，而不是逐条手敲 bash**：`references/pull_okx_data.py`
@@ -123,18 +149,25 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 > ```
 > 产物为 `<SYM>.txt`（`=== 段名 ===` 分段，含全部指标）与 `<SYM>_c20.txt`（K 线，供 20 日摆动高低计算），可直接喂给解析脚本。下面的命令清单是该脚本内置的取数口径参考，手动排障或改指标时对照看。
 
-OKX 行情命令（免凭证；指标日线周期写 `1Dutc`，K线周期写 `1D`——两者不同）：
+OKX 行情命令（免凭证；指标日线周期写 `1Dutc`、周线写 `1Wutc`，K线周期写 `1D`——注意 `1W` 会 HTTP 400）：
+
+> 多周期 RSI/MACD 的周期随模式变（其余指标两模式相同）：**短线**用 `15m/1H/4H/1Dutc`，
+> **波段**去掉 `15m`、加 `1Wutc` → `1H/4H/1Dutc/1Wutc`。下面同时列出，按模式取用。
 
 ```bash
 okx market ticker BTC-USDT                                  # 现价/24h高低/量/涨跌
-okx market indicator rsi BTC-USDT --bar 15m                 # 多周期 RSI
+# ---- 多周期 RSI ----
+okx market indicator rsi BTC-USDT --bar 15m                 # 仅短线（波段不取）
 okx market indicator rsi BTC-USDT --bar 1H
 okx market indicator rsi BTC-USDT --bar 4H
 okx market indicator rsi BTC-USDT --bar 1Dutc
-okx market indicator macd BTC-USDT --bar 15m                # 15m 入场择时印证（与 15m RSI 交叉，避免孤儿信号）
-okx market indicator macd BTC-USDT --bar 1H                 # 多周期 MACD
+okx market indicator rsi BTC-USDT --bar 1Wutc               # 仅波段（swing，周线定趋势/估值）
+# ---- 多周期 MACD ----
+okx market indicator macd BTC-USDT --bar 15m                # 仅短线：15m 入场择时印证（与 15m RSI 交叉，避免孤儿信号）
+okx market indicator macd BTC-USDT --bar 1H
 okx market indicator macd BTC-USDT --bar 4H
 okx market indicator macd BTC-USDT --bar 1Dutc
+okx market indicator macd BTC-USDT --bar 1Wutc             # 仅波段（swing）
 okx market indicator bb  BTC-USDT --bar 1Dutc               # 布林带（日/4H）
 okx market indicator bb  BTC-USDT --bar 4H
 okx market indicator kdj BTC-USDT --bar 1Dutc               # KDJ
@@ -147,7 +180,7 @@ okx market indicator ma  BTC-USDT --bar 1Dutc --params 20
 okx market indicator ahr999   BTC-USDT --bar 1Dutc          # 宏观周期（仅 BTC）
 okx market indicator rainbow  BTC-USDT --bar 1Dutc          # 彩虹图（仅 BTC）
 okx market indicator top-long-short BTC-USDT --bar 1Dutc    # 顶级交易员多空比（大数据）
-okx market candles BTC-USDT --bar 1D --limit 3              # 取上一日 H/L/C 算经典枢轴
+okx market candles BTC-USDT --bar 1D --limit 25             # 日线 K：上一根已收盘 H/L/C 算枢轴 + 20 日摆动高低/区间位置（需 ≥22 根，脚本默认 25）
 okx market funding-rate BTC-USDT-SWAP                       # 资金费率
 okx market open-interest --instType SWAP --instId BTC-USDT-SWAP   # 持仓量
 ```
