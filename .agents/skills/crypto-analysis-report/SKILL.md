@@ -1,8 +1,8 @@
 ---
 name: crypto-analysis-report
-version: 1.3.1
+version: 1.3.2
 date: 2026-06-13
-updated: 2026-07-07
+updated: 2026-07-15
 description: >-
   加密货币与股票/股票代币深度分析与专业报告生成技能。获取实时行情、计算多周期
   技术指标、按三支柱框架评分（加密：宏观30%+量价40%+衍生品30%；股票：估值30%+
@@ -15,6 +15,7 @@ description: >-
 ---
 
 <!-- 变更日志（维护用）：
+  v1.3.2 (2026-07-15) — 实战 review 修复三项：①build_report.py 补齐**做空镜像通道**（v1.2.2 起 SKILL 契约要求但渲染器从未实现，28 份报告 0 做空）：derive() 加 sl_s/tp_s/rr_s，decide() 加破位共振做空分支（跌破 MA5/10+双周期 MACD 同负；深度超卖或追空 RR<1 仍 HOLD，与做多侧赔率闸门对称），开仓指南表/§六 RR 行按方向渲染，HOLD 表补双向 RR；②增强档触发条件改为「先健康探测」：datahub Connected≠可用（连续 5 轮空响应实证），先打一发 sentiment_index current，空/错→立即降级基础档并标注，不再逐工具重试；③明确 raw 拉取目录落 scratchpad，禁止落 analysis_reports/（实测已被 12 个 okx_raw_* 目录污染）。
   v1.3.1 (2026-07-07) — 波段模式第二轮迭代（评分/止损也随模式调，不再只差周期集）：①止损用**周线 ATR(14)**（swing 加拉 ATR14W @1Wutc）替代日线，倍数仍 2×/3×；②三支柱权重波段 **40/35/25**（宏观加权，短线仍 30/40/30）；③decide 趋势共振周期波段用 **1D+1W**（短线仍 4H+1D）。日线 ATR 仍用于§五展示与波动性%；报告头/§四权重、开仓指南 ATR 周期标注均随模式变。
   v1.3.0 (2026-07-06) — 新增「短线/波段」双分析模式（第 0.5 步）+ 固化报告渲染器 `references/build_report.py`。短线（默认）多周期 RSI/MACD=15m/1H/4H/1D；波段（提示词含"波段"触发）=1H/4H/1D/1W（删 15m、加周线 1Wutc）。pull_okx_data.py 加 `--mode short|swing` 并写 `=== MODE ===` 标记；build_report.py `--mode auto` 自动识别、按周期标签索引确保 4H/1D 引用不错位、波段报告文件名带 swing_ 前缀。日线锚定指标/评分/ATR/枢轴两模式一致（先最小改动）。
   v1.2.4 (2026-07-04) — 第 1A 步新增可复用拉取脚本 `references/pull_okx_data.py`：单条 okx 命令校验下游 parse 实际用到的字段（如 dif/dea/ts/14/50/200），空/半截输出自动退避 1-2 秒重试（默认 2 次），仍失败则在文件里写 `[FETCH_FAILED: 原因]` 并汇总报错退出，替代内联手写 bash + 事后人工补拉。
@@ -57,7 +58,9 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 
 ## 输出约定（务必遵守）
 
-- 目录：`analysis_reports/`（不存在则创建）。
+- 目录：`analysis_reports/`（不存在则创建）。**只放最终报告 .md**；`pull_okx_data.py --out-dir`
+  的 raw 拉取目录一律放 agent scratchpad（或其它临时目录），禁止落 `analysis_reports/`
+  （历史上已被 `okx_raw_*` 原始目录/脚本/`__pycache__` 污染过）。
 - 文件名：`<symbol>_report_<YYYYMMDDHHmmss>.md`，symbol 用小写无斜杠，
   如 `btc_report_20260613174319.md`、`eth_report_20260613174320.md`。
 - **多币种 = 每个币一个独立文件**，不要合并成一份。
@@ -80,7 +83,7 @@ Yahoo Finance 真股数据**，**股票代币只走 Bitget 股票代币现货数
 | 档位 | 触发条件 | 取数策略 |
 |------|----------|----------|
 | **基础档**（默认·零依赖） | 仅有 okx CLI | 全走 OKX 公开行情（免凭证免代理）。宏观面/情绪面/新闻维度**如实标「数据缺失/需额外数据源」** |
-| **增强档**（自动启用） | datahub MCP 已配（`claude mcp list` 见 datahub Connected） | 仅补加密宏观/情绪/新闻，把原「数据缺失」维度升级为真实数据 |
+| **增强档**（自动启用） | datahub MCP 已配 **且健康探测通过**：先打一发 `sentiment_index current`，返回真实数值才启用；返回空/错误字段（如 `{"alt_me_error": ""}`）→ **立即降级基础档**并在报告标注，不再逐工具重试（Connected≠可用，2026-07 连续多轮实证） | 仅补加密宏观/情绪/新闻，把原「数据缺失」维度升级为真实数据 |
 
 **增强档能力择优表**（实测最优源）：
 

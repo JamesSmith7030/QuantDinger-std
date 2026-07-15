@@ -156,12 +156,15 @@ def derive(d):
     sl = max(price - 2 * atr_stop, support * 0.99)
     tp = min(price + 3 * atr_stop, resistance * 1.01)
     rr = (tp - price) / (price - sl) if price > sl else float('nan')
+    sl_s = min(price + 2 * atr_stop, resistance * 1.01)   # 空单镜像（SKILL §2.5）
+    tp_s = max(price - 3 * atr_stop, support * 0.99)
+    rr_s = (price - tp_s) / (sl_s - price) if sl_s > price else float('nan')
     rp = (price - d['sw_lo']) / (d['sw_hi'] - d['sw_lo']) * 100
     bw = (U - Lo) / M * 100
     volp = d['atr'] / price * 100  # 波动性用日线 ATR（展示口径不变）
     return dict(P=P, R1=R1, S1=S1, R2=R2, S2=S2, support=support, resistance=resistance,
-                sl=sl, tp=tp, rr=rr, rangepos=rp, bw=bw, volp=volp,
-                atr_stop=atr_stop, atr_tf=atr_tf)
+                sl=sl, tp=tp, rr=rr, sl_s=sl_s, tp_s=tp_s, rr_s=rr_s,
+                rangepos=rp, bw=bw, volp=volp, atr_stop=atr_stop, atr_tf=atr_tf)
 
 
 def fmt(x, dp=2):
@@ -179,14 +182,27 @@ def decide(d, k, sc):
     lsr = d['tls'][2]
     rr = k['rr']
     above_ma = price > ma5 and price > ma10
+    below_ma = price < ma5 and price < ma10
     ta, tb = TREND_TFS[d['mode']]  # 短线 4H+1D、波段 1D+1W
     st_up = d['hist'][i_of(d, ta)] > 0 and d['hist'][i_of(d, tb)] > 0
+    st_dn = d['hist'][i_of(d, ta)] < 0 and d['hist'][i_of(d, tb)] < 0
     overbought = rsi_4h >= 70 or j >= 100
+    oversold = rsi_4h <= 30 or j <= 0
     overheated = comp >= 60
     below200 = price < d['ema200']
+    rr_s = k['rr_s']
     poor_rr = (not (rr == rr)) or rr < 1  # nan 或 <1
+    poor_rr_s = (not (rr_s == rr_s)) or rr_s < 1
     if overheated:
         form, dirn, note = 'B', 'HOLD', f"过热（综合{comp}）+区间位置{k['rangepos']:.0f}%，观望或减仓，不追高"
+    elif below_ma and st_dn:
+        # 偏空共振（跌破短均线 + 双周期 MACD 同负）→ 做空镜像；超卖/赔率差不追空（对称于做多侧）
+        if oversold or poor_rr_s:
+            form, dirn = 'B', 'HOLD'
+            note = f"破位偏空但{'深度超卖' if oversold else f'追空 RR 仅 1:{rr_s:.2f}'}，不追空，反弹承压再评估"
+        else:
+            form, dirn = 'A', '做空'
+            note = f"{mode_cn}偏空共振（跌破 MA5/10 + {ta}/{tb} MACD 同负），反弹承压进场，收复 MA10 减/离场"
     elif poor_rr or (overbought and rr < 1.2):
         form, dirn, note = 'B', 'HOLD', f"追多 RR 仅 1:{rr:.2f}{'、超买' if overbought else ''}，观望等回踩"
     elif above_ma and st_up:
@@ -204,11 +220,14 @@ def decide(d, k, sc):
         sig = "🟡 NEUTRAL 中性（过热减仓）"
     else:
         sig = "🔴 SELL 卖出（狂热对冲）"
-    conf = "中 ~55%" if (form == 'A' and rr == rr and rr >= 1.5) else ("中 ~50%" if form == 'A' else "低-中 ~45%")
+    rr_eff = rr_s if dirn == '做空' else rr  # 有效 RR 随方向取镜像值
+    conf = "中 ~55%" if (form == 'A' and rr_eff == rr_eff and rr_eff >= 1.5) else ("中 ~50%" if form == 'A' else "低-中 ~45%")
     tf = f"{sum(1 for r in d['rsi'] if r > 50) * 25}%"
     mps = f"{(sum(1 for r in d['rsi'] if r > 50) / 4 - 0.5) * 10:+.0f}"
     cons = "BUY" if sum(1 for r in d['rsi'] if r > 50) >= 3 else "MIXED"
-    if form == 'A':
+    if form == 'A' and dirn == '做空':
+        entry = f"反弹 Pivot {k['P']:.0f} / MA5 {ma5:.0f} 承压不破再进场"
+    elif form == 'A':
         entry = f"现价回踩 Pivot {k['P']:.0f} / MA5 {ma5:.0f} 附近"
     else:
         entry = f"不追高；回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 且不破再评估"
@@ -297,14 +316,24 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
     review = f"{labels[0]}/{labels[1]} 看择时，{labels[2]}/{labels[3]} 收盘复核趋势与 MACD 动能"
 
     if dec['form'] == 'A':
+        is_short = dec['dir'] == '做空'
+        confirm_txt = ("偏空确认（跌破短均线+双周期 MACD 同负）" if is_short
+                       else "偏多确认（站上短均线+多周期 MACD 转正）")
+        entry_note = "反弹承压不破关键位" if is_short else "回踩确认不破关键位"
+        sl_v, tp_v, rr_v = (k['sl_s'], k['tp_s'], k['rr_s']) if is_short else (k['sl'], k['tp'], k['rr'])
+        sl_f = (f"min(现价+2×{k['atr_tf']}ATR, 阻力×1.01)" if is_short
+                else f"max(现价−2×{k['atr_tf']}ATR, 支撑×0.99)")
+        tp_f = (f"max(现价−3×{k['atr_tf']}ATR, 支撑×0.99)" if is_short
+                else f"min(现价+3×{k['atr_tf']}ATR, 阻力×1.01)")
+        side_txt = "空单参考" if is_short else "多单参考"
         guide = (f"**形态 A — 方向明确（{dec['dir']}，由数据决定）：**\n"
                  "| 项目 | 价位 | 说明 |\n|------|------|------|\n"
-                 f"| **交易方向** | **{dec['dir']}** | 偏多确认（站上短均线+多周期 MACD 转正） |\n"
+                 f"| **交易方向** | **{dec['dir']}** | {confirm_txt} |\n"
                  f"| 当前价格 | ${fmt(d['price'])} | 24h {d['chg']:+.2f}% |\n"
-                 f"| 建议入场 | {dec['entry']} | 回踩确认不破关键位 |\n"
-                 f"| 止损价 | ${fmt(k['sl'])} | max(现价−2×{k['atr_tf']}ATR, 支撑×0.99) |\n"
-                 f"| 止盈目标 | ${fmt(k['tp'])} | min(现价+3×{k['atr_tf']}ATR, 阻力×1.01) |\n"
-                 f"| 风险回报比 | 1 : {k['rr']:.2f} | 多单参考 |\n\n"
+                 f"| 建议入场 | {dec['entry']} | {entry_note} |\n"
+                 f"| 止损价 | ${fmt(sl_v)} | {sl_f} |\n"
+                 f"| 止盈目标 | ${fmt(tp_v)} | {tp_f} |\n"
+                 f"| 风险回报比 | 1 : {rr_v:.2f} | {side_txt} |\n\n"
                  f"> ⚠️ {dec['note']}。止损止盈基于 **{k['atr_tf']} ATR(14)=${fmt(k['atr_stop'])}**；"
                  f"支撑/阻力为三方法平均（枢轴+20日摆动+布林）。非投资建议。")
     else:
@@ -312,7 +341,8 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
                  "| 项目 | 价位 | 说明 |\n|------|------|------|\n"
                  f"| **交易方向** | **HOLD（观望）** | {dec['note']} |\n"
                  f"| 当前价格 | ${fmt(d['price'])} | 24h {d['chg']:+.2f}% |\n\n"
-                 f"> ⚠️ 参考（非当前建议入场）：结构支撑 ${fmt(k['support'])} / 阻力 ${fmt(k['resistance'])}；做多 RR 仅 1:{k['rr']:.2f}。{dec['entry']}。非投资建议。")
+                 f"> ⚠️ 参考（非当前建议入场）：结构支撑 ${fmt(k['support'])} / 阻力 ${fmt(k['resistance'])}；"
+                 f"做多 RR 1:{k['rr']:.2f}、做空 RR 1:{k['rr_s']:.2f}。{dec['entry']}。非投资建议。")
     if coin == 'BTC':
         macro_txt = (f"AHR999 **{d['ahr999']}**（zone{int(d['ah_zone'])} 抄底/DCA 区）、彩虹 band{int(d['rb_band'])}、"
                      f"价 vs EMA50(${fmt(d['ema50'], 1)})/EMA200(${fmt(d['ema200'], 1)}) 均在下方 → **历史低估区**。")
@@ -433,7 +463,7 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 | 布林中轨 MB | ${fmt(M, 1)} | 支撑 S1 / 阻力 R1 | ${fmt(k['S1'])} / ${fmt(k['R1'])} |
 | 布林下轨 L | ${fmt(L, 1)} | 支撑 S2 / 阻力 R2 | ${fmt(k['S2'])} / ${fmt(k['R2'])} |
 | 布林带宽 % | {k['bw']:.2f}% | 20 日摆动高/低 | ${fmt(d['sw_hi'])} / ${fmt(d['sw_lo'])} |
-| ATR(14) 绝对值 | ${fmt(d['atr'])}（{k['volp']:.2f}%） | 风险回报(多单参考) | 1 : {k['rr']:.2f} |
+| ATR(14) 绝对值 | ${fmt(d['atr'])}（{k['volp']:.2f}%） | 风险回报(多/空参考) | 1 : {k['rr']:.2f} / 1 : {k['rr_s']:.2f} |
 | 计算用收盘价 | ${fmt(d['price'])} | — | — |
 
 ## 七、详细分析
