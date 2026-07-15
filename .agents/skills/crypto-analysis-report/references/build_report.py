@@ -2,12 +2,12 @@
 """crypto-analysis-report 报告渲染器：解析 pull_okx_data.py 产出的 <SYM>.txt / <SYM>_c20.txt，
 按三支柱框架评分并渲染中文 Markdown 深度分析报告，落盘到 --out-dir。
 
-双模式（K 线周期集不同，其余评分/ATR/枢轴口径一致）：
+双模式（周期集、权重和止损 ATR 尺度不同，日线展示指标/枢轴口径共享）：
     short（默认·短线，1-3天）: 多周期 RSI/MACD = 15m/1H/4H/1D
     swing（波段，数天-数周）  : 多周期 RSI/MACD = 1H/4H/1D/1W（删 15m 噪声、加周线定趋势）
 
 模式由数据文件里的 `=== MODE ===` 标记决定（pull_okx_data.py 写入）；--mode 显式指定可覆盖。
-日线锚定指标（BB/KDJ/EMA/ATR/MA/枢轴/20日区间）两模式相同——先最小改动，仅切换多周期动能读数与标注。
+短线权重 30/40/30、日线 ATR 止损；波段权重 40/35/25、周线 ATR 止损。
 
 用法：
     python build_report.py --symbols BTC,ETH,SOL,BNB --in-dir <拉取目录> --out-dir <报告目录> [--mode auto|short|swing]
@@ -39,6 +39,17 @@ HOLD_CN = {"short": "短线（1-3天）", "swing": "波段（数天-数周）"}
 WEIGHTS = {"short": (0.30, 0.40, 0.30), "swing": (0.40, 0.35, 0.25)}
 # decide 里判趋势动能共振用的两个周期：波段看更高周期
 TREND_TFS = {"short": ("4H", "1D"), "swing": ("1D", "1W")}
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
+MAX_SYMBOLS = 20
+
+
+def parse_symbols(raw):
+    symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+    if not symbols or any(not SYMBOL_RE.fullmatch(s) for s in symbols):
+        raise ValueError("币种仅允许 1-20 位 ASCII 字母或数字，多个币种用逗号分隔")
+    if len(symbols) > MAX_SYMBOLS or len(symbols) != len(set(symbols)):
+        raise ValueError(f"币种不得重复，且单批最多 {MAX_SYMBOLS} 个")
+    return symbols
 
 
 def parse_sections(txt):
@@ -60,15 +71,21 @@ def num(s, pat):
 
 
 def detect_mode(in_dir, symbols):
-    """从第一个能读到的 <SYM>.txt 的 MODE 标记推断模式，缺省 short。"""
+    """校验所有现有原始文件的 MODE 标记；缺少全部文件时由后续逐币错误处理。"""
+    found = {}
     for c in symbols:
         p = Path(in_dir) / f"{c}.txt"
         if p.exists():
             sec = parse_sections(p.read_text(encoding="utf-8"))
             mode = (sec.get("MODE", "") or "").strip().lower()
-            if mode in ("short", "swing"):
-                return mode
-    return "short"
+            if mode not in ("short", "swing"):
+                raise ValueError(f"{c}.txt 的 MODE 缺失或无效：{mode or '<empty>'}")
+            found[c] = mode
+    modes = set(found.values())
+    if len(modes) > 1:
+        detail = ", ".join(f"{c}={mode}" for c, mode in found.items())
+        raise ValueError(f"检测到混合 mixed 模式，禁止批量混用：{detail}")
+    return next(iter(modes), "short")
 
 
 def parse(in_dir, coin, mode):
@@ -167,6 +184,14 @@ def derive(d):
                 rangepos=rp, bw=bw, volp=volp, atr_stop=atr_stop, atr_tf=atr_tf)
 
 
+def directional_levels(k, direction):
+    if direction == "做多":
+        return k['sl'], k['tp'], k['rr']
+    if direction == "做空":
+        return k['sl_s'], k['tp_s'], k['rr_s']
+    raise ValueError(f"不支持的交易方向：{direction}")
+
+
 def fmt(x, dp=2):
     return f"{x:,.{dp}f}"
 
@@ -193,47 +218,60 @@ def decide(d, k, sc):
     rr_s = k['rr_s']
     poor_rr = (not (rr == rr)) or rr < 1  # nan 或 <1
     poor_rr_s = (not (rr_s == rr_s)) or rr_s < 1
-    if overheated:
-        form, dirn, note = 'B', 'HOLD', f"过热（综合{comp}）+区间位置{k['rangepos']:.0f}%，观望或减仓，不追高"
-    elif below_ma and st_dn:
+    ref_dir = None
+    if below_ma and st_dn:
         # 偏空共振（跌破短均线 + 双周期 MACD 同负）→ 做空镜像；超卖/赔率差不追空（对称于做多侧）
+        ref_dir = '做空'
         if oversold or poor_rr_s:
             form, dirn = 'B', 'HOLD'
             note = f"破位偏空但{'深度超卖' if oversold else f'追空 RR 仅 1:{rr_s:.2f}'}，不追空，反弹承压再评估"
         else:
             form, dirn = 'A', '做空'
             note = f"{mode_cn}偏空共振（跌破 MA5/10 + {ta}/{tb} MACD 同负），反弹承压进场，收复 MA10 减/离场"
-    elif poor_rr or (overbought and rr < 1.2):
-        form, dirn, note = 'B', 'HOLD', f"追多 RR 仅 1:{rr:.2f}{'、超买' if overbought else ''}，观望等回踩"
     elif above_ma and st_up:
-        form, dirn = 'A', '做多'
-        note = (f"逆大周期反弹，控仓、破 MA10 减" if below200 else f"{mode_cn}偏多，破 MA10 减")
+        ref_dir = '做多'
+        if poor_rr or (overbought and rr < 1.2):
+            form, dirn = 'B', 'HOLD'
+            note = f"偏多结构已出现但追多 RR 仅 1:{rr:.2f}{'、超买' if overbought else ''}，观望等回踩"
+        else:
+            form, dirn = 'A', '做多'
+            note = (f"逆大周期反弹，控仓、破 MA10 减" if below200 else f"{mode_cn}偏多，破 MA10 减")
     else:
-        form, dirn, note = 'B', 'HOLD', "结构未共振，观望"
-    if comp < 20:
-        sig = "🟢 BUY 买入（抄底低估）"
-    elif comp < 40:
-        sig = "🟢 BUY 买入（复苏偏多）"
-    elif comp < 60:
-        sig = f"🟡 NEUTRAL 中性（{mode_cn + '偏多' if form == 'A' else '观望'}）"
-    elif comp < 80:
-        sig = "🟡 NEUTRAL 中性（过热减仓）"
+        form, dirn = 'B', 'HOLD'
+        note = f"结构未共振，{'市场过热，' if overheated else ''}观望"
+    if form == 'A' and dirn == '做多':
+        sig = f"🟢 BUY 买入（{mode_cn}做多确认）"
+    elif form == 'A' and dirn == '做空':
+        sig = f"🔴 SELL 卖出/做空（{mode_cn}偏空确认）"
     else:
-        sig = "🔴 SELL 卖出（狂热对冲）"
+        sig = f"🟡 NEUTRAL 中性（{zone_of(comp)}，HOLD）"
     rr_eff = rr_s if dirn == '做空' else rr  # 有效 RR 随方向取镜像值
     conf = "中 ~55%" if (form == 'A' and rr_eff == rr_eff and rr_eff >= 1.5) else ("中 ~50%" if form == 'A' else "低-中 ~45%")
-    tf = f"{sum(1 for r in d['rsi'] if r > 50) * 25}%"
-    mps = f"{(sum(1 for r in d['rsi'] if r > 50) / 4 - 0.5) * 10:+.0f}"
-    cons = "BUY" if sum(1 for r in d['rsi'] if r > 50) >= 3 else "MIXED"
+    up_count = sum(1 for r in d['rsi'] if r > 50)
+    down_count = sum(1 for r in d['rsi'] if r < 50)
+    tf = f"{max(up_count, down_count) * 25}%"
+    mps = f"{(up_count - down_count) / 4 * 5:+.0f}"
+    cons = "BUY" if up_count >= 3 else "SELL" if down_count >= 3 else "MIXED"
     if form == 'A' and dirn == '做空':
-        entry = f"反弹 Pivot {k['P']:.0f} / MA5 {ma5:.0f} 承压不破再进场"
+        entry = f"反弹 MA5 {ma5:.0f} 附近承压不破再进场"
     elif form == 'A':
-        entry = f"现价回踩 Pivot {k['P']:.0f} / MA5 {ma5:.0f} 附近"
+        if price < d['ema50']:
+            entry = f"回踩 MA5 {ma5:.0f} 确认不破；EMA50 {d['ema50']:.0f} 为上方阻力"
+        else:
+            entry = f"回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 附近确认不破"
+    elif ref_dir == '做空':
+        entry = f"不追空；反弹 MA5 {ma5:.0f} 附近承压不破再评估"
+    elif ref_dir == '做多':
+        if price < d['ema50']:
+            entry = (f"不追高；先收复 EMA50 {d['ema50']:.0f} 并站稳；若先回落，"
+                     f"只观察 MA5 {ma5:.0f} 是否守住")
+        else:
+            entry = f"不追高；回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 且不破再评估"
     else:
-        entry = f"不追高；回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 且不破再评估"
+        entry = f"暂不预设方向；等待价格与 MA5 {ma5:.0f} / MA10 {ma10:.0f} 重新共振"
     return dict(form=form, dir=dirn, note=note, sig=sig, conf=conf, tf=tf, mps=mps, cons=cons,
                 entry=entry, overbought=overbought, below200=below200, st_up=st_up,
-                above_ma=above_ma, overheated=overheated)
+                above_ma=above_ma, overheated=overheated, ref_dir=ref_dir)
 
 
 def reasons_risks(d, k, sc, dec):
@@ -250,19 +288,32 @@ def reasons_risks(d, k, sc, dec):
     else:
         R.append(f"20日区间位置 {k['rangepos']:.1f}%，价 vs EMA50({fmt(d['ema50'], 1)})/EMA200({fmt(d['ema200'], 1)}) 定位估值维度")
     R.append(f"MACD 柱 {npos}/4 周期为正、站上 {nma}/3 均线（MA5/10/20），动能{'偏多修复' if d['hist'][i1] > 0 else '偏弱'}")
-    if dec['form'] == 'A':
-        R.append(f"做多 RR 1:{k['rr']:.2f}，支撑 {fmt(k['support'])} 结构扎实，资金费率 {d['funding']:+.4f}% 无过热杠杆")
+    if dec['form'] == 'A' and dec['dir'] == '做空':
+        R.append(f"做空 RR 1:{k['rr_s']:.2f}，阻力 {fmt(k['resistance'])} 提供失效锚点，资金费率 {d['funding']:+.4f}%")
+    elif dec['form'] == 'A':
+        R.append(f"做多 RR 1:{k['rr']:.2f}，支撑 {fmt(k['support'])} 提供失效锚点，资金费率 {d['funding']:+.4f}%")
+    elif dec.get('ref_dir') == '做空':
+        R.append(f"偏空结构已出现，但做空 RR 仅 1:{k['rr_s']:.2f} 或存在超卖风险，当前不追空")
+    elif dec.get('ref_dir') == '做多':
+        R.append(f"偏多结构已出现，但做多 RR 仅 1:{k['rr']:.2f} 或存在超买风险，当前不追高")
     else:
-        R.append(f"量价支柱 {vp}，动能仍在，但当前位置追多性价比不足（见风险）")
+        R.append(f"量价支柱 {vp}，多空结构尚未共振，当前不预设开仓方向")
     Rk = []
     if dec['below200']:
-        Rk.append(f"价格处 EMA50({fmt(d['ema50'], 1)})、EMA200({fmt(d['ema200'], 1)}) 下方，大周期空头排列，反弹或遇均线压制")
+        pos50 = '上方' if price >= d['ema50'] else '下方'
+        pos200 = '上方' if price >= d['ema200'] else '下方'
+        Rk.append(f"价格位于 EMA50({fmt(d['ema50'], 1)}){pos50}、EMA200({fmt(d['ema200'], 1)}){pos200}，大周期仍受 EMA200 压制")
     if dec['overheated']:
-        Rk.append(f"综合 {comp} 落入过热减仓区，20日区间位置 {k['rangepos']:.1f}% 贴近顶部，回调概率升高")
+        range_note = "贴近顶部" if k['rangepos'] >= 80 else "尚未贴近顶部"
+        Rk.append(f"市场温度 {comp} 落入过热区，20日区间位置 {k['rangepos']:.1f}%（{range_note}）；高温不等于立即反转")
     elif dec['overbought']:
-        Rk.append(f"4H RSI {d['rsi'][i4]} / KDJ J {d['kdj'][2]} 偏超买，短线过热，做多 RR 仅 1:{k['rr']:.2f}")
+        if dec['dir'] == '做空' or dec.get('ref_dir') == '做空':
+            Rk.append(f"4H RSI {d['rsi'][i4]} / KDJ J {d['kdj'][2]} 偏超买，但强势延续可能造成空头挤压")
+        else:
+            Rk.append(f"4H RSI {d['rsi'][i4]} / KDJ J {d['kdj'][2]} 偏超买，短线过热，做多 RR 仅 1:{k['rr']:.2f}")
     else:
-        Rk.append(f"1D RSI {d['rsi'][i1]}、MA20({fmt(ma20, 1)}) 上方承压，动能未确认强势")
+        ma20_pos = '上方' if price >= ma20 else '下方'
+        Rk.append(f"1D RSI {d['rsi'][i1]}、价格位于 MA20({fmt(ma20, 1)}){ma20_pos}，动能未确认强势")
     Rk.append(f"顶级交易员多空比 {lsr}（{'偏空' if lsr < 1 else '偏多'}），资金费率 {d['funding']:+.4f}%（{'多头付费' if d['funding'] > 0 else '空头付费'}）")
     return R, Rk
 
@@ -300,6 +351,9 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
     dif, dea, hist1d = d['macd1d']
     ma5, ma10, ma20 = d['ma']
     lr, sr, lsr = d['tls']
+    ema50_side = '上方' if d['price'] >= d['ema50'] else '下方'
+    ema200_side = '上方' if d['price'] >= d['ema200'] else '下方'
+    ema_state = f"EMA50{ema50_side} / EMA200{ema200_side}"
     i1 = i_of(d, '1D')
     rsi1d = d['rsi'][i1]
     npos = sum(1 for h in d['hist'] if h > 0)
@@ -314,13 +368,21 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
     macd_line = "、".join(f"{labels[i]} {d['hist'][i]:+}" for i in range(4))
     rsi_detail = " / ".join(f"{labels[i]} {d['rsi'][i]}" for i in range(4))
     review = f"{labels[0]}/{labels[1]} 看择时，{labels[2]}/{labels[3]} 收盘复核趋势与 MACD 动能"
+    active_dir = dec['dir'] if dec['form'] == 'A' else dec.get('ref_dir')
+    active_sl, active_tp, active_rr = directional_levels(k, active_dir) if active_dir else (None, None, None)
+    if dec['form'] == 'A':
+        holding_note = f"{dec['dir']}止损参考 ${fmt(active_sl)}；触发失效条件离场"
+    elif active_dir:
+        holding_note = f"当前不开仓；{active_dir}候选失效位参考 ${fmt(active_sl)}"
+    else:
+        holding_note = "当前不开新仓；已有仓位沿用原计划，不新增方向假设"
 
     if dec['form'] == 'A':
         is_short = dec['dir'] == '做空'
         confirm_txt = ("偏空确认（跌破短均线+双周期 MACD 同负）" if is_short
                        else "偏多确认（站上短均线+多周期 MACD 转正）")
         entry_note = "反弹承压不破关键位" if is_short else "回踩确认不破关键位"
-        sl_v, tp_v, rr_v = (k['sl_s'], k['tp_s'], k['rr_s']) if is_short else (k['sl'], k['tp'], k['rr'])
+        sl_v, tp_v, rr_v = directional_levels(k, dec['dir'])
         sl_f = (f"min(现价+2×{k['atr_tf']}ATR, 阻力×1.01)" if is_short
                 else f"max(现价−2×{k['atr_tf']}ATR, 支撑×0.99)")
         tp_f = (f"max(现价−3×{k['atr_tf']}ATR, 支撑×0.99)" if is_short
@@ -345,17 +407,21 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
                  f"做多 RR 1:{k['rr']:.2f}、做空 RR 1:{k['rr_s']:.2f}。{dec['entry']}。非投资建议。")
     if coin == 'BTC':
         macro_txt = (f"AHR999 **{d['ahr999']}**（zone{int(d['ah_zone'])} 抄底/DCA 区）、彩虹 band{int(d['rb_band'])}、"
-                     f"价 vs EMA50(${fmt(d['ema50'], 1)})/EMA200(${fmt(d['ema200'], 1)}) 均在下方 → **历史低估区**。")
+                     f"价位于 EMA50(${fmt(d['ema50'], 1)}){ema50_side}、EMA200(${fmt(d['ema200'], 1)}){ema200_side} → **历史低估区**。")
     else:
         macro_txt = (f"非 BTC 无 AHR999，均线估值：价 vs EMA50(${fmt(d['ema50'], 1)})/EMA200(${fmt(d['ema200'], 1)})、"
                      f"20日区间位置 **{k['rangepos']:.1f}%**。")
     r3 = "3. " + R[2] if len(R) > 2 else ""
 
-    # §九 操作倾向：当前模式行放首位并带 dec.note
-    other_mode = 'swing' if mode == 'short' else 'short'
+    # 只评价本次真实计算的模式，不用当前数据臆测另一个模式。
+    if dec['form'] == 'A':
+        contract_note = f"仅按{dec['dir']}确认执行，控制杠杆，严格止损 ${fmt(active_sl)}"
+    elif active_dir:
+        contract_note = f"当前 HOLD；仅在{active_dir}条件重新确认后评估，候选失效位 ${fmt(active_sl)}"
+    else:
+        contract_note = "当前 HOLD；方向未确认，不开新仓"
     op_rows = (f"| {HOLD_CN[mode]} | {dec['note']} |\n"
-               f"| {HOLD_CN[other_mode]} | {'逆 EMA200 大周期，反弹为主，谨慎轻仓' if dec['below200'] else '顺势持有，回踩加仓'} |\n"
-               f"| 合约 | 高波动，控制杠杆，严格止损 ${fmt(k['sl'])} |")
+               f"| 合约 | {contract_note} |")
 
     # §二 周期趋势预判：按当前模式的 4 个真实周期出方向（诚实，不再套固定日历标签）
     trend_rows = "\n".join(f"| {labels[i]} | {tf_dir(d['rsi'][i], d['hist'][i])} |" for i in range(4))
@@ -371,19 +437,20 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 | 项目 | 结果 |
 |------|------|
 | **综合信号** | {dec['sig']} |
-| **综合评分** | **{comp}/100**（{zone}） |
+| **市场温度评分** | **{comp}/100** |
+| **市场温度分区** | **{zone}**（仅表示估值/热度，不直接决定开仓方向） |
 | **置信度** | {dec['conf']} |
 | **分析模式** | {mode_cn}（多周期 {lbl}） |
 | **市场阶段** | {'EMA200 下方大周期弱势中的反弹' if dec['below200'] else '均线上方'}；{'过热' if dec['overheated'] else '超买' if dec['overbought'] else '动能修复'} |
 | **当前价格** | **${fmt(d['price'])}**（24h {d['chg']:+.2f}%） |
 
-**一句话**：宏观 {macro} + 量价 {vp} + 衍生 {deriv} → 综合 {comp}（{zone}）。{R[0]}
+**一句话**：市场温度 {comp}（{zone}）；执行信号 {dec['dir']}。宏观 {macro} + 量价 {vp} + 衍生 {deriv}。{R[0]}
 
 ### 多周期客观共识
 | 项目 | 值 |
 |------|-----|
 | 共识方向 | {dec['cons']} |
-| 周期一致度 | {dec['tf']}（RSI>50 周期占比，{lbl}） |
+| 周期一致度 | {dec['tf']}（RSI 主导方向占比，{lbl}） |
 | 多周期评分 | {dec['mps']}（-5 ~ +5） |
 
 ---
@@ -391,7 +458,7 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 ## 下一步（行动清单）
 1. **🎯 盯关键位**：阻力 ${fmt(k['resistance'])}（R1 ${fmt(k['R1'])}）；支撑 ${fmt(k['support'])}（S1 ${fmt(k['S1'])}）
 2. **📥 / ⏳ 操作倾向**：{dec['note']}
-3. **🛡️ 持仓处理**：止损参考 ${fmt(k['sl'])}；过热/破位减仓
+3. **🛡️ 持仓处理**：{holding_note}
 4. **🔁 复核节奏**：{review}
 5. **🔬 进阶**：如需精确仓位张数，调用 `position-sizer`
 
@@ -437,7 +504,7 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 均线：价 vs MA5 ${fmt(ma5, 1)} / MA10 ${fmt(ma10, 1)} / MA20 ${fmt(ma20, 1)}（{nma}/3 站上）；KDJ K{d['kdj'][0]}/D{d['kdj'][1]}/J{d['kdj'][2]}。
 ### 支柱三 · 衍生品（{wd * 100:.0f}%）— 评分 ≈ {deriv}
 资金费率 {d['funding']:+.4f}%、OI {fmt(d['oi'])} {d['unit']}、顶级多空比 {lsr}。
-### 综合评分
+### 市场温度评分
 `{comp_formula}` → {zone}
 
 ## 五、技术指标 PRO
@@ -445,7 +512,7 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
 |------|-----|------|
 | RSI(14) 1D | {rsi1d} | {"超买" if rsi1d >= 70 else "超卖" if rsi1d <= 30 else "中性"} |
 | MACD(12,26,9) 1D | 柱 {hist1d:+} | {"看涨修复" if hist1d > 0 else "看跌"} |
-| 均线趋势 | {"多头(站上MA5/10)" if d['price'] > ma5 and d['price'] > ma10 else "空头/纠缠"} | {"EMA50/200 下方" if dec['below200'] else "EMA 上方"} |
+| 均线趋势 | {"多头(站上MA5/10)" if d['price'] > ma5 and d['price'] > ma10 else "空头/纠缠"} | {ema_state} |
 | ATR(14) | ${fmt(d['atr'])} | 真实波幅均值 |
 | 布林带宽 % | {k['bw']:.2f}% | {"扩张" if k['bw'] > 15 else "挤压"} |
 | 20 日区间位置 | {k['rangepos']:.1f}% | 0–100% |
@@ -494,8 +561,10 @@ def report(in_dir, out_dir, coin, mode, ts, tsh):
     suffix = "" if mode == "short" else "swing_"
     path = Path(out_dir) / f"{coin.lower()}_{suffix}report_{ts}.md"
     path.write_text(md, encoding="utf-8")
+    summary_rr = active_rr if active_rr is not None else k['rr']
     return dict(coin=coin, price=d['price'], comp=comp, zone=zone, form=dec['form'],
-                dir=dec['dir'], rr=k['rr'], rangepos=k['rangepos'], path=str(path))
+                dir=dec['dir'], rr=summary_rr, rr_long=k['rr'], rr_short=k['rr_s'],
+                rangepos=k['rangepos'], path=str(path))
 
 
 def main():
@@ -506,9 +575,16 @@ def main():
     ap.add_argument("--mode", default="auto", choices=["auto", "short", "swing"],
                     help="auto=读数据文件 MODE 标记（默认）；short/swing 显式覆盖")
     args = ap.parse_args()
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    try:
+        symbols = parse_symbols(args.symbols)
+    except ValueError as exc:
+        ap.error(str(exc))
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-    mode = detect_mode(args.in_dir, symbols) if args.mode == "auto" else args.mode
+    try:
+        mode = detect_mode(args.in_dir, symbols) if args.mode == "auto" else args.mode
+    except ValueError as exc:
+        print(f"[错误] {exc}")
+        return 1
     now = datetime.datetime.now()
     ts, tsh = now.strftime("%Y%m%d%H%M%S"), now.strftime("%Y-%m-%d %H:%M:%S")
     res, failed = [], []
@@ -518,15 +594,14 @@ def main():
         except Exception as exc:  # noqa: BLE001 - 单币失败（多因 [FETCH_FAILED] 字段缺失）不拖垮整批
             failed.append((c, str(exc)))
     print(f"模式={MODE_CN[mode]}（{'/'.join(LABELS[mode])}）")
-    print("coin  price      comp  zone  form/dir   RR    rangepos  file")
+    print("coin  price      temp  zone  form/dir   RR(L/S)       rangepos  file")
     for r in res:
         print(f"{r['coin']:4} {r['price']:>10.2f} {r['comp']:>5} {r['zone']:4} "
-              f"{r['form']}/{r['dir']:4} {r['rr']:>6.2f} {r['rangepos']:>6.1f}%  {Path(r['path']).name}")
+              f"{r['form']}/{r['dir']:4} {r['rr_long']:>5.2f}/{r['rr_short']:<5.2f} "
+              f"{r['rangepos']:>6.1f}%  {Path(r['path']).name}")
     for c, exc in failed:
         print(f"[跳过] {c}：{exc}（该币数据缺失/含 [FETCH_FAILED]，请重拉该币）")
-    if failed and not res:
-        return 1
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

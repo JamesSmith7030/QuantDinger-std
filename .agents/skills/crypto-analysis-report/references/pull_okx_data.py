@@ -42,6 +42,9 @@ RSI_MACD_BARS = {
     "short": ("15m", "1H", "4H", "1Dutc"),
     "swing": ("1H", "4H", "1Dutc", "1Wutc"),
 }
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
+MAX_SYMBOLS = 20
+MAX_WORKERS = 8
 
 # Windows 上 okx 是 npm 装的 .cmd 包装脚本，subprocess 在 shell=False 时
 # 无法直接启动 .cmd（非 PE 可执行文件），必须走 shell=True 才能被 cmd.exe 解析执行。
@@ -62,6 +65,26 @@ class FetchResult:
     output: str
     reason: str = ""
     attempts: int = 0
+
+
+def parse_symbols(raw: str) -> list[str]:
+    symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+    if not symbols or any(not SYMBOL_RE.fullmatch(s) for s in symbols):
+        raise ValueError("币种仅允许 1-20 位 ASCII 字母或数字，多个币种用逗号分隔")
+    if len(symbols) > MAX_SYMBOLS or len(symbols) != len(set(symbols)):
+        raise ValueError(f"币种不得重复，且单批最多 {MAX_SYMBOLS} 个")
+    return symbols
+
+
+def validate_runtime_args(args: argparse.Namespace) -> None:
+    if args.retries < 0:
+        raise ValueError("--retries 不能小于 0")
+    if args.min_delay < 0 or args.max_delay < args.min_delay:
+        raise ValueError("重试延迟必须满足 0 <= --min-delay <= --max-delay")
+    if args.timeout <= 0:
+        raise ValueError("--timeout 必须大于 0")
+    if args.candle_limit < 22:
+        raise ValueError("--candle-limit 必须至少为 22")
 
 
 def build_sections(symbol: str, mode: str = "short") -> list[Section]:
@@ -247,12 +270,16 @@ def main() -> int:
                          help="short=短线 15m/1H/4H/1D（默认）；swing=波段 1H/4H/1D/1W")
     args = parser.parse_args()
 
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    try:
+        symbols = parse_symbols(args.symbols)
+        validate_runtime_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_failures: dict[str, list[str]] = {}
-    with ThreadPoolExecutor(max_workers=max(1, len(symbols))) as pool:
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(symbols))) as pool:
         futures = [
             pool.submit(fetch_symbol, sym, out_dir, args.retries, args.min_delay,
                         args.max_delay, args.timeout, args.candle_limit, args.mode)

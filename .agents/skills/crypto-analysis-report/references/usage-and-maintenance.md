@@ -1,19 +1,20 @@
 # crypto-analysis-report 使用文档（新人向）+ 维护管理指南
 
 > 面向两类人：① 第一次用这个技能出报告的人；② 以后要改/维护这个技能的人。
-> 技能主体见 [../SKILL.md](../SKILL.md)；标准范例见 `analysis_reports/btc_report_20260613174319.md`。
+> 技能主体见 [../SKILL.md](../SKILL.md)；确定性行为以 `../tests/` 回归测试为准，
+> 实时报告只落临时/输出目录，不把历史行情范例纳入版本库。
 
 ---
 
 ## 一、这个技能是干嘛的（30 秒看懂）
 
-你说一句"分析 BTC"或"分析 TSLA 股票"，它就自动：**拉实时行情 → 算多周期技术指标 → 按三支柱打分 →
+你说一句"分析 BTC"，它就自动：**拉实时行情 → 算多周期技术指标 → 按三支柱打分 →
 生成一份带结论、评分、关键价位、下一步行动的中文 Markdown 报告**，存到 `analysis_reports/`。
 
 - **加密分支**：走 OKX 公开行情，免费、免登录、国内直连（不用代理、不用 API Key）。
-- **股票/股票代币分支**（TSLA/NVDA/AAPL/MSFT…，v1.2.0 起数据源唯一化）：**真股只走 Yahoo Finance 直连**（query1.finance.yahoo.com，不经 datahub），**股票代币只走 Bitget 现货**，二者禁止跨源替代；
-  指标用 technical-analysis 引擎计算，三支柱换成「估值30%+量价40%+市场30%」。**需先配 datahub MCP**（见 4.6）。
-- 一次能分析一个标的，也能多个（每个各出一份报告，加密与股票可混合请求）。
+- **股票/股票代币自动报告**：当前未实现，已列为后续独立迭代 TODO；未来限定真股
+  Yahoo Finance、股票代币 Bitget，不允许跨源冒充。
+- 一次能分析一个或多个加密标的（每个各出一份报告）。
 - 报告只做客观分析，**永远带"非投资建议"免责声明**。
 
 ---
@@ -36,13 +37,10 @@
 | 主流币扫描 | `给 BTC ETH SOL BNB 各生成一份深度分析报告` |
 | 自选清单 | `分析这几个币：DOGE、XRP、ADA` |
 
-### 股票 / 股票代币（真股 Yahoo 直连 + 代币 Bitget，免 datahub）
-| 你想要的 | 这样说 |
-|----------|--------|
-| 分析单只股票 | `分析 TSLA 股票，出份深度报告` ／ `分析特斯拉` |
-| 分析股票代币 | `分析 TSLAUSDT 股票代币，看溢价和技术面`（用 Bitget R 系 RTSLAUSDT） |
-| 多股票 | `分析 TSLA、NVDA、AAPL 各出一份报告` |
-| 加密+股票混合 | `分析 BTC 和 TSLA，各出一份` |
+### 股票 / 股票代币
+
+当前属于后续 TODO。收到此类请求时说明尚未端到端实现，不用 OKX 股票映射永续、旧报告或
+真股价格冒充股票代币报告。
 
 ### 进阶
 | 你想要的 | 这样说 |
@@ -50,7 +48,8 @@
 | 出完报告要交易计划 | `分析 BTC 后，再用 position-sizer 给我入场/止损/张数` |
 | 只要快速结论不要长报告 | `BTC 现在什么信号？一句话`（这会走 kline-indicator quick 模式，不落盘） |
 
-> 触发后 Claude 会自己跑 okx 命令、算分、写文件，最后回你：生成了哪几份报告（带路径）+ 每份一句话结论。
+> 触发后会运行 OKX 取数与渲染脚本，最后返回比较表、逐币理由、市场变化、双向 RR、
+> 报告路径和实际数据档位，不再只给一句话。
 
 ---
 
@@ -58,10 +57,10 @@
 
 报告从上到下（9 大板块）：
 
-1. **综合结论**：信号（🟢买入/🟡中性/🔴卖出）、评分（0-100）、置信度、现价，外加**多周期客观共识**（共识方向/一致度）。**只看这一块就够做大致判断。**
-2. **下一步（行动清单）+ 📋开仓指南**：具体动作 + **当前价格 / 建议入场 / 止损价 / 止盈目标 / 风险回报比**（止损止盈基于 ATR 波动率算）。**想直接知道在哪买、在哪止损止盈，看这块。**
+1. **综合结论**：可执行信号（买入/中性/卖出做空）、市场温度评分与分区、置信度、现价，外加**多周期客观共识**（BUY/MIXED/SELL + 对称一致度）。
+2. **下一步（行动清单）+ 📋开仓指南**：具体动作 + **当前价格 / 建议入场 / 止损价 / 止盈目标 / 风险回报比**（止损止盈基于 ATR 波动率算）。**想核对在哪入场、在哪止损止盈，看这块。**
 3. **实时市场数据**：现价/24h/成交量/OI/资金费率。
-4. **周期趋势预判**：24h / 3天 / 1周 / 1月 的方向预判。
+4. **周期趋势预判**：短线按 15m/1H/4H/1D，波段按 1H/4H/1D/1W 展示真实周期方向。
 5. **Crypto 交易大数据**：OI、资金费率、多空比、净流（净流类 OKX 无数据会标 `--`）。
 6. **三支柱评分拆解**：为什么是这个分。
    - 宏观周期(30%)：长线贵不贵（AHR999、彩虹图）。**分低=便宜=利多**；非 BTC 用均线近似。
@@ -71,8 +70,9 @@
 8. **量化参数明细**：MACD 分量、MA5/10/20、布林三轨、经典枢轴 S1/R1/S2/R2、摆动高低、ATR、风险回报比。
 9. **详细分析 / 核心理由与风险 / 操作倾向**：文字详述与分风格建议。
 
-**新人最该记住三点**：
-- 评分 40-60 是**中性区**，意味着多空不明朗，别重仓赌方向。
+**新人最该记住四点**：
+- 市场温度 40-60 是**中性区**；温度描述位置，不直接下达交易方向。
+- 只有做多结构和 RR 同时通过才是 BUY；做空结构和 RR 同时通过才是 SELL；其余一律 HOLD。
 - "宏观低估"是周期定位，**不等于马上涨**——便宜可以更便宜。
 - 报告是**研究参考不是投资建议**，真金白银前自己再核一遍最新行情。
 
@@ -84,11 +84,15 @@
 ```
 .agents/skills/crypto-analysis-report/
 ├── SKILL.md                          # 主体：工作流 + 评分口径 + 报告模板
-└── references/
-    ├── usage-and-maintenance.md      # 本文件：使用文档 + 维护指南
-    └── pull_okx_data.py              # 加密分支取数脚本：内置重试 + 字段完整性校验
+├── references/
+│   ├── usage-and-maintenance.md      # 本文件：使用文档 + 维护指南
+│   ├── pull_okx_data.py              # 取数：重试 + 字段完整性校验
+│   └── build_report.py               # 解析、温度评分、方向决策、Markdown 渲染
+└── tests/
+    └── test_crypto_analysis_report.py # 标准库确定性回归测试
 ```
-落盘产物在仓库根 `analysis_reports/`（不在技能目录内）。
+最终报告落盘在仓库根 `analysis_reports/`；原始快照和测试输出放 scratchpad/系统临时目录，
+不得写入 `analysis_reports/`。
 
 ### 4.2 常见维护场景
 
@@ -96,12 +100,11 @@
 |----------|--------|
 | 报告板块增删/改版式 | SKILL.md「报告模板」节 + 同步更新本文「看懂报告」 |
 | 调整三支柱权重或评分口径 | SKILL.md「三支柱评分」表（注意与全局 kline-indicator 的 three-pillars.md 保持一致） |
-| 新增/替换技术指标 | SKILL.md「第 1A 步」（加密）/「第 1B 步」（股票）命令清单；加密分支同步改 `references/pull_okx_data.py` 里 `build_sections()` 的命令与校验正则 |
+| 新增/替换技术指标 | SKILL.md「第 1A 步」命令清单；同步改 `pull_okx_data.py::build_sections()` 校验与 `build_report.py::parse()` |
 | okx 拉取偶发空输出/字段缺失（网络抖动） | 用 `references/pull_okx_data.py` 而非手写 bash：内置重试（默认 2 次、间隔 1-2s）+ 字段校验，仍失败会在 `<SYM>.txt` 写 `[FETCH_FAILED: 原因]` 并汇总报错退出，不会让下游 parse 静默拿到空值 |
-| 换数据源（如加 Binance/Bybit） | 对应「第 1A/1B 步」命令；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
-| 股票数据源/口径（唯一化 v1.2.0） | SKILL.md「股票/股票代币分析」节：**真股仅 Yahoo Finance 直连**（query1.finance.yahoo.com，含 P/E/52周/相关性，不经 datahub）、**代币仅 Bitget 现货**（价/K线/溢价）、指标 technical-analysis 引擎。**禁止** OKX 股票映射永续、Binance RWA、datahub、跨源冒充 |
-| 调整股票三支柱 | SKILL.md「第 2B 步」表（估值/量价/市场，权重 30/40/30） |
-| 改输出路径/命名 | SKILL.md「输出约定」；股票文件名 `<ticker>_report_<时间戳>.md` |
+| 换加密数据源（如加 Binance/Bybit） | 对应「第 1A 步」命令与两个 reference 脚本；注意 Binance 主 API 国内需韩国节点+代理（见 `.agents/docs/交易所技能清单与测试提示词.md` §1.1），OKX 直连最省事 |
+| 股票/股票代币 | 当前仅保留设计资料与数据源红线；必须另建 Trellis 任务实现 Yahoo/Bitget、交易时段、独立评分和测试，不在加密维护中顺带开发 |
+| 改输出路径/命名 | SKILL.md「输出约定」；确保 `analysis_reports/` 只放最终 Markdown |
 
 ### 4.3 维护时必须守住的红线
 1. **数据真实**：所有数值来自实时 okx 命令，**禁止编造或照抄旧报告/样例的结论**。
@@ -111,12 +114,13 @@
 5. **指标周期坑**：指标日线用 `1Dutc`、K 线用 `1D`；RSI 值在 `^\s*14` 行；`ahr999`/`rainbow` 仅 BTC。
 
 ### 4.4 自测清单（改完技能后跑一遍）
+- [ ] 先跑：`python -m unittest discover -s .agents/skills/crypto-analysis-report/tests -p "test_*.py" -v`。
 - [ ] 单币种：`分析 ETH` → 生成 `analysis_reports/eth_report_<时间戳>.md`，板块齐全含「下一步」。
 - [ ] 多币种：`分析 BTC、SOL` → 生成 2 份独立文件，结论各异且与数据吻合。
 - [ ] 非 BTC 币种：宏观支柱正确降级为均线/布林近似并注明（因无 AHR999）。
-- [ ] **股票**：`分析 TSLA 股票` → 生成 `tsla_report_<时间戳>.md`，三支柱为「估值/量价/市场」，含溢价/52周/相关性，OI/资金费率标 N/A。
-- [ ] **股票代币溢价**：报告中「溢价% = (代币价−真股价)/真股价」计算正确。
-- [ ] 免责声明、时间戳、现价均正确填充（股票版含证券+代币溢价风险）。
+- [ ] 合成做空：综合信号、开仓方向、理由、止损和 RR 全部使用空侧口径。
+- [ ] 批量部分失败、非法币种和 short/swing 混合原始文件都返回非零退出码。
+- [ ] 免责声明、时间戳、现价均正确填充。
 - [ ] 抽查 1 个评分：手动按权重算一遍综合分，与报告一致。
 
 ### 4.5 算法来源（对齐后端引擎，便于维护时同步）
@@ -131,12 +135,13 @@
 > 不复制（无数据源会编造），相关维度一律如实标注「数据缺失」。后端若改算法，按此处同步更新本技能。
 
 ### 4.6 依赖与环境
-- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。取数推荐用 `references/pull_okx_data.py`（纯标准库，Python 3.9+ 即可，无需额外 pip 依赖）；Windows 上 `okx` 是 npm 装的 `.cmd` 包装脚本，脚本内部已对 Windows 走 `shell=True` 规避 `subprocess` 找不到 `.cmd` 的坑，直接调用即可。加密增强档（宏观/情绪/新闻）可选 datahub MCP（`claude mcp add --scope user --transport http datahub https://datahub.noxiaohao.com/mcp`）——**仅加密用，股票不用**。
-- **股票分支**（v1.2.0 数据源唯一化）：
-  - **真股：Yahoo Finance 直连**（`https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>`），免凭证、不经 datahub。价/OHLCV/52周/相关性/基本面全部 Yahoo。
-  - **股票代币：Bitget 现货直连**（`https://api.bitget.com/api/v2/spot/market/...`），免凭证。**首选 R 系 `RTSLAUSDT`/`RNVDAUSDT`**（流动性高，24h 量千万级）；ON 系 `TSLAONUSDT`/`NVDAONUSDT` 几乎无量、仅备用。裸 `TSLAUSDT`/`NVDAUSDT` 不存在。仅取价/24h量/K线，用于溢价与代币视角。
-  - 指标：technical-analysis 技能（`~/.claude/skills/technical-analysis/src/kline_indicator_utils.py` 的 `IndicatorManager`）；需 `pip install pandas numpy`。
-  - 备注：datahub `technical_analysis`/`global_assets` 等**不用于股票取数**（唯一源规定）；datahub `technical_analysis` 仅支持加密 `X/USDT`。
+- **加密分支**：`okx` CLI（`npm install -g @okx_ai/okx-trade-cli`，行情免鉴权免代理）。取数与渲染脚本均只用 Python 标准库。Windows 上 `okx` 是 npm 的 `.cmd` 包装脚本，脚本已处理启动方式。
+- **加密增强档**：datahub MCP 只是可选补充。Connected 不等于可用，必须先用 `sentiment_index current` 健康探测；返回空值或错误字段立即降级基础档，不逐工具重试。
 - 评分框架参考全局技能 `kline-indicator`（`~/.claude/skills/kline-indicator/references/three-pillars.md`）。
 - 相关文档：[.agents/docs/交易所技能清单与测试提示词.md](../../../docs/交易所技能清单与测试提示词.md)（OKX/Binance/Bitget 技能、datahub MCP 与代理坑）。
-- 已落盘股票范例：`analysis_reports/tsla_report_20260615115500.md`（TSLA，股票三支柱完整版）。
+
+## 五、后续 TODO（待办事项）
+
+- [ ] **股票和股票代币自动报告独立迭代**：真股仅 Yahoo Finance、股票代币仅 Bitget；
+  实现美股交易时段、溢折价、独立股票三支柱、确定性测试与端到端报告。必须另建
+  Trellis 任务验证，不与加密维护混做，也不得用历史股票范例冒充当前能力。
