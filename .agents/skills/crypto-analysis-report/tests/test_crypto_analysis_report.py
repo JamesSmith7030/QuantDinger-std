@@ -163,7 +163,7 @@ class DecisionContractTests(unittest.TestCase):
 
         self.assertEqual("HOLD", dec["dir"])
         self.assertEqual("做多", dec["ref_dir"])
-        self.assertIn("收复 EMA50", dec["entry"])
+        self.assertIn("收复 EMA50 $120.00", dec["entry"])
         self.assertNotIn("回踩 MA5 100 / EMA50", dec["entry"])
 
 

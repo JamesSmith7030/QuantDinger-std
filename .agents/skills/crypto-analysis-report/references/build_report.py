@@ -253,22 +253,22 @@ def decide(d, k, sc):
     mps = f"{(up_count - down_count) / 4 * 5:+.0f}"
     cons = "BUY" if up_count >= 3 else "SELL" if down_count >= 3 else "MIXED"
     if form == 'A' and dirn == '做空':
-        entry = f"反弹 MA5 {ma5:.0f} 附近承压不破再进场"
+        entry = f"反弹 MA5 ${fmt(ma5)} 附近承压不破再进场"
     elif form == 'A':
         if price < d['ema50']:
-            entry = f"回踩 MA5 {ma5:.0f} 确认不破；EMA50 {d['ema50']:.0f} 为上方阻力"
+            entry = f"回踩 MA5 ${fmt(ma5)} 确认不破；EMA50 ${fmt(d['ema50'])} 为上方阻力"
         else:
-            entry = f"回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 附近确认不破"
+            entry = f"回踩 MA5 ${fmt(ma5)} / EMA50 ${fmt(d['ema50'])} 附近确认不破"
     elif ref_dir == '做空':
-        entry = f"不追空；反弹 MA5 {ma5:.0f} 附近承压不破再评估"
+        entry = f"不追空；反弹 MA5 ${fmt(ma5)} 附近承压不破再评估"
     elif ref_dir == '做多':
         if price < d['ema50']:
-            entry = (f"不追高；先收复 EMA50 {d['ema50']:.0f} 并站稳；若先回落，"
-                     f"只观察 MA5 {ma5:.0f} 是否守住")
+            entry = (f"不追高；先收复 EMA50 ${fmt(d['ema50'])} 并站稳；若先回落，"
+                     f"只观察 MA5 ${fmt(ma5)} 是否守住")
         else:
-            entry = f"不追高；回踩 MA5 {ma5:.0f} / EMA50 {d['ema50']:.0f} 且不破再评估"
+            entry = f"不追高；回踩 MA5 ${fmt(ma5)} / EMA50 ${fmt(d['ema50'])} 且不破再评估"
     else:
-        entry = f"暂不预设方向；等待价格与 MA5 {ma5:.0f} / MA10 {ma10:.0f} 重新共振"
+        entry = f"暂不预设方向；等待价格与 MA5 ${fmt(ma5)} / MA10 ${fmt(ma10)} 重新共振"
     return dict(form=form, dir=dirn, note=note, sig=sig, conf=conf, tf=tf, mps=mps, cons=cons,
                 entry=entry, overbought=overbought, below200=below200, st_up=st_up,
                 above_ma=above_ma, overheated=overheated, ref_dir=ref_dir)
