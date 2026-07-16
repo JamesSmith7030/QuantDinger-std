@@ -154,6 +154,8 @@ output = {
 9. plot/signal 的 `data` 长度 ≠ `len(df)` → 渲染报错。
 10. ScriptStrategy 想全平却写 `ctx.sell()`。
 11. NaN 未清理（rolling/ewm 前导 NaN）就比较。
+12. RSI 用 `loss.replace(0, np.nan)` 后直接 `fillna(50)`，会把连续上涨误判成中性；
+    应先将 `(loss == 0) & (gain > 0)` 对应的 RSI 设为 100，再只把未成熟或横盘 `0/0` 填为 50。
 
 > 注：1/2/3/8 是 2026-06-17 review v1.3.4 / v2.0.5 / PowerTower 三个实盘策略时反复发现的真实坑。
 > 改完务必 `python examples/_verify_template.py <脚本>` 离线自检——但注意它**不含沙箱校验**，
