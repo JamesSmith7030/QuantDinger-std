@@ -4,7 +4,7 @@ my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 R
 # 回测参数（开单参数） 标的：BTC K线周期：1H 日期范围：2Y  杠杆：1x  交易方向：双向  回测收益：+22.30%
 # 模拟开单参数 标的：BTC K线周期：1H  杠杆：5x  交易方向：双向
 
-# @strategy entryPct 0.5
+# @strategy entryPct 0.9
 # @strategy stopLossPct 0.3
 # @strategy takeProfitPct 0
 # @strategy trailingEnabled false
