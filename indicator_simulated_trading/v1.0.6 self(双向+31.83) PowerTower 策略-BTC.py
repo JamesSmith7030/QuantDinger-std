@@ -1,11 +1,15 @@
 my_indicator_name = "v1.0.6 self(双向+31.83) PowerTower 策略-BTC/USDT"
 my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 RSI 周期与更严格且对称的超买超卖阈值，减少过度交易并提升风险调整收益。"
 # extend v1.0.5(双向+31.83) PowerTower 策略-BTC/USDT
-# 回测参数（开单参数） 标的：BTC K线周期：1H 日期范围：2Y  杠杆：1x  交易方向：双向  回测收益：+22.30%
+# 历史基线（旧止损参数） 标的：BTC K线周期：1H 日期范围：2Y  杠杆：1x  交易方向：双向  回测收益：+22.30%
 # 模拟开单参数 标的：BTC K线周期：1H  杠杆：5x  交易方向：双向
 
+# signal_form: four_way
+# exit_owner: engine
+# flip_mode: R2
+
 # @strategy entryPct 0.9
-# @strategy stopLossPct 0.3
+# @strategy stopLossPct 0.05
 # @strategy takeProfitPct 0
 # @strategy trailingEnabled false
 # @strategy trailingStopPct 0
@@ -44,16 +48,24 @@ rsi = rsi.fillna(50.0)
 raw_buy = (rsi < safe_buy_threshold).fillna(False)
 raw_sell = (rsi > safe_sell_threshold).fillna(False)
 
-buy = (raw_buy & (~raw_buy.shift(1).fillna(False))).fillna(False).astype(bool)
-sell = (raw_sell & (~raw_sell.shift(1).fillna(False))).fillna(False).astype(bool)
+def edge(s):
+    s = s.fillna(False).astype(bool)
+    prev = s.shift(1).fillna(False).astype(bool)
+    return (s & ~prev).astype(bool)
 
-df['buy'] = buy
-df['sell'] = sell
+
+open_long = edge(raw_buy)
+open_short = edge(raw_sell)
+
+df['open_long'] = open_long
+df['close_long'] = open_short
+df['open_short'] = open_short
+df['close_short'] = open_long
 
 plot_rsi_name = 'RSI(' + str(safe_rsi_len) + ')'
 
-buy_marks = [low.iloc[i] * 0.995 if bool(df['buy'].iloc[i]) else None for i in range(len(df))]
-sell_marks = [high.iloc[i] * 1.005 if bool(df['sell'].iloc[i]) else None for i in range(len(df))]
+buy_marks = [low.iloc[i] * 0.995 if bool(df['open_long'].iloc[i]) else None for i in range(len(df))]
+sell_marks = [high.iloc[i] * 1.005 if bool(df['open_short'].iloc[i]) else None for i in range(len(df))]
 
 output = {
     'name': my_indicator_name,
