@@ -6,6 +6,8 @@ my_indicator_description = "使用指数移动平均线(EMA)的交叉策略：�
 # exit_owner: engine
 # flip_mode: R1
 
+# --- 参数声明 (Params) ---
+
 # --- 策略风控默认值 (Strategy Defaults) ---
 # @strategy entryPct 0.9
 # @strategy stopLossPct 0.05

@@ -8,6 +8,12 @@ my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 R
 # exit_owner: engine
 # flip_mode: R2
 
+# --- 参数声明 (Params) ---
+# @param rsi_len int 14 RSI period
+# @param buy_threshold float 24 Oversold threshold
+# @param sell_threshold float 76 Overbought threshold
+
+# --- 策略风控默认值 (Strategy Defaults) ---
 # @strategy entryPct 0.9
 # @strategy stopLossPct 0.05
 # @strategy takeProfitPct 0
@@ -15,10 +21,6 @@ my_indicator_description = "保持 RSI 反转逻辑不变，使用更平滑的 R
 # @strategy trailingStopPct 0
 # @strategy trailingActivationPct 0
 # @strategy tradeDirection both
-
-# @param rsi_len int 14 RSI period
-# @param buy_threshold float 24 Oversold threshold
-# @param sell_threshold float 76 Overbought threshold
 
 rsi_len = params.get('rsi_len', 14)
 buy_threshold = params.get('buy_threshold', 24)
@@ -43,6 +45,7 @@ avg_loss = loss.ewm(alpha=1.0 / safe_rsi_len, adjust=False).mean()
 
 rs = avg_gain / avg_loss.replace(0, np.nan)
 rsi = 100 - (100 / (1 + rs))
+rsi = rsi.where(~((avg_loss == 0) & (avg_gain > 0)), 100.0)
 rsi = rsi.fillna(50.0)
 
 raw_buy = (rsi < safe_buy_threshold).fillna(False)
