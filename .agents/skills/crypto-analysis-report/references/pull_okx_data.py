@@ -8,9 +8,9 @@
 绝不把空/半截数据静默写进文件让下游 parse/pipeline 猜或崩溃。
 
 用法：
-    python pull_okx_data.py --symbols BTC,ETH,SOL,BNB --out-dir <目录>
+    python pull_okx_data.py --symbols BTC,ETH,SOL,BNB,XRP --out-dir <目录>
 
-产物（与旧手拉流程一致，pipeline.py 可直接读）：
+产物（`generate_crypto_reports.py` 可直接读）：
     <目录>/<SYM>.txt       各项指标，`=== 段名 ===` 分段
     <目录>/<SYM>_c20.txt   近 N 日 K 线（供 20 日摆动高低计算），无分段头
 
@@ -30,9 +30,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
-DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL", "BNB"]
+DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP"]
 
 # Windows 上 okx 是 npm 装的 .cmd 包装脚本，subprocess 在 shell=False 时
 # 无法直接启动 .cmd（非 PE 可执行文件），必须走 shell=True 才能被 cmd.exe 解析执行。
@@ -63,7 +64,9 @@ def build_sections(symbol: str) -> list[Section]:
             "TICKER",
             ["okx", "market", "ticker", spot],
             [r"^last\s+[\d.]+", r"^24h high\s+[\d.]+", r"^24h low\s+[\d.]+",
-             r"^24h vol\s+[\d.]+", r"^24h change %\s+-?[\d.]+%"],
+             r"^24h open\s+[\d.]+", r"^24h vol\s+[\d.]+",
+             r"^24h change %\s+-?[\d.]+%",
+             r"^time\s+\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}"],
         ),
     ]
     for bar in ("15m", "1H", "4H", "1Dutc"):
@@ -86,7 +89,7 @@ def build_sections(symbol: str) -> list[Section]:
     sections.append(Section(
         "KDJ 1D",
         ["okx", "market", "indicator", "kdj", spot, "--bar", "1Dutc"],
-        [r"^k\s+[\d.]+", r"^d\s+[\d.]+", r"^j\s+[\d.]+"],
+        [r"^k\s+-?[\d.]+", r"^d\s+-?[\d.]+", r"^j\s+-?[\d.]+"],
     ))
     sections.append(Section(
         "EMA50",
@@ -133,13 +136,26 @@ def build_sections(symbol: str) -> list[Section]:
     sections.append(Section(
         "OI",
         ["okx", "market", "open-interest", "--instType", "SWAP", "--instId", swap],
-        [rf"{re.escape(swap)}\s+[\d.]+"],
+        [rf"^{re.escape(swap)}\s+[\d.]+\s+[\d.]+\s+"
+         r"\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}"],
     ))
     return sections
 
 
 def build_candle_cmd(symbol: str, limit: int) -> list[str]:
     return ["okx", "market", "candles", f"{symbol}-USDT", "--bar", "1D", "--limit", str(limit)]
+
+
+def parse_symbols(raw: str) -> list[str]:
+    symbols = list(dict.fromkeys(symbol.strip().upper() for symbol in raw.split(",") if symbol.strip()))
+    if not symbols:
+        raise ValueError("至少需要一个币种")
+    if len(symbols) > 50:
+        raise ValueError("单次最多拉取 50 个币种")
+    invalid = [symbol for symbol in symbols if not re.fullmatch(r"[A-Z0-9]{2,12}", symbol)]
+    if invalid:
+        raise ValueError(f"币种格式非法：{', '.join(invalid)}")
+    return symbols
 
 
 def validate(output: str, patterns: list[str]) -> tuple[bool, str]:
@@ -217,22 +233,29 @@ def fetch_symbol(symbol: str, out_dir: Path, retries: int, min_delay: float, max
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS),
-                         help="逗号分隔的币种列表，如 BTC,ETH,SOL,BNB")
+                         help="逗号分隔的币种列表，如 BTC,ETH,SOL,BNB,XRP")
     parser.add_argument("--out-dir", required=True, help="写入 <SYM>.txt / <SYM>_c20.txt 的目录")
     parser.add_argument("--retries", type=int, default=2, help="单条命令失败后的最大重试次数（默认 2）")
     parser.add_argument("--min-delay", type=float, default=1.0, help="重试前最小等待秒数（默认 1.0）")
     parser.add_argument("--max-delay", type=float, default=2.0, help="重试前最大等待秒数（默认 2.0）")
     parser.add_argument("--timeout", type=float, default=20.0, help="单条 okx 命令超时秒数（默认 20）")
     parser.add_argument("--candle-limit", type=int, default=25,
-                         help="K 线拉取根数，需 >=22 才够 20 日摆动高低计算（默认 25）")
+                         help="K 线拉取根数，需 >=21 才够 20 日摆动高低计算（默认 25）")
     args = parser.parse_args()
 
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    try:
+        symbols = parse_symbols(args.symbols)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.candle_limit < 21:
+        parser.error("--candle-limit 必须 >=21")
+    if args.retries < 0 or args.min_delay < 0 or args.max_delay < args.min_delay or args.timeout <= 0:
+        parser.error("重试次数、延迟或超时参数非法")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_failures: dict[str, list[str]] = {}
-    with ThreadPoolExecutor(max_workers=max(1, len(symbols))) as pool:
+    with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as pool:
         futures = [
             pool.submit(fetch_symbol, sym, out_dir, args.retries, args.min_delay,
                         args.max_delay, args.timeout, args.candle_limit)
